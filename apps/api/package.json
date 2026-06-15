@@ -1,0 +1,34 @@
+{
+  "name": "@society-ev/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@society-ev/contracts": "workspace:*",
+    "@society-ev/db": "workspace:*",
+    "bcryptjs": "3.0.3",
+    "date-fns": "4.4.0",
+    "date-fns-tz": "3.2.0",
+    "jose": "6.2.3",
+    "next": "16.2.7",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.2.7",
+    "typescript": "5.9.3",
+    "vitest": "4.1.8"
+  }
+}

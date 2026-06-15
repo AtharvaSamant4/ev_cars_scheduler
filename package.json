@@ -1,0 +1,18 @@
+{
+  "name": "society-ev-booking",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm --filter @society-ev/api dev",
+    "build": "pnpm --filter @society-ev/api build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @society-ev/api test",
+    "mobile:start": "pnpm --filter @society-ev/mobile start",
+    "mobile:web": "pnpm --filter @society-ev/mobile web",
+    "db:generate": "pnpm --filter @society-ev/db db:generate",
+    "db:migrate": "pnpm --filter @society-ev/db db:migrate",
+    "db:deploy": "pnpm --filter @society-ev/db db:deploy",
+    "db:seed": "pnpm --filter @society-ev/db db:seed"
+  }
+}

@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  RESIDENT
+  ADMIN
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  MAINTENANCE
+  INACTIVE
+}
+
+enum BookingStatus {
+  BOOKED
+  COMPLETED
+  CANCELLED
+}
+
+model Society {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String    @db.VarChar(150)
+  timezone  String    @default("Asia/Kolkata") @db.VarChar(64)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(3)
+  flats     Flat[]
+  users     User[]
+  vehicles  Vehicle[]
+  bookings  Booking[]
+}
+
+model Flat {
+  id        String      @id @default(uuid()) @db.Uuid
+  societyId String      @db.Uuid
+  number    String      @db.VarChar(30)
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime    @updatedAt @db.Timestamptz(3)
+  society   Society     @relation(fields: [societyId], references: [id], onDelete: Restrict)
+  resident  User?
+  quotas    FlatQuota[]
+  bookings  Booking[]
+
+  @@unique([societyId, number])
+  @@index([societyId, isActive])
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  societyId    String    @db.Uuid
+  flatId       String?   @unique @db.Uuid
+  role         UserRole
+  name         String    @db.VarChar(120)
+  email        String?   @unique @db.VarChar(255)
+  phone        String?   @unique @db.VarChar(20)
+  passwordHash String    @db.VarChar(255)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+  society      Society   @relation(fields: [societyId], references: [id], onDelete: Restrict)
+  flat         Flat?     @relation(fields: [flatId], references: [id], onDelete: Restrict)
+  bookings     Booking[]
+
+  @@index([societyId, role, isActive])
+}
+
+model Vehicle {
+  id                 String        @id @default(uuid()) @db.Uuid
+  societyId          String        @db.Uuid
+  name               String        @db.VarChar(80)
+  registrationNumber String        @db.VarChar(32)
+  status             VehicleStatus @default(AVAILABLE)
+  createdAt          DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime      @updatedAt @db.Timestamptz(3)
+  society            Society       @relation(fields: [societyId], references: [id], onDelete: Restrict)
+  bookings           Booking[]
+
+  @@unique([societyId, registrationNumber])
+  @@index([societyId, status])
+}
+
+model FlatQuota {
+  id               String   @id @default(uuid()) @db.Uuid
+  flatId           String   @db.Uuid
+  year             Int      @db.SmallInt
+  allocatedMinutes Int
+  usedMinutes      Int      @default(0)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+  flat             Flat     @relation(fields: [flatId], references: [id], onDelete: Cascade)
+
+  @@unique([flatId, year])
+  @@index([year])
+}
+
+model Booking {
+  id              String        @id @default(uuid()) @db.Uuid
+  societyId       String        @db.Uuid
+  vehicleId       String        @db.Uuid
+  flatId          String        @db.Uuid
+  userId          String        @db.Uuid
+  quotaYear       Int           @db.SmallInt
+  startTime       DateTime      @db.Timestamptz(3)
+  endTime         DateTime      @db.Timestamptz(3)
+  durationMinutes Int
+  status          BookingStatus @default(BOOKED)
+  cancelledAt     DateTime?     @db.Timestamptz(3)
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
+  society         Society       @relation(fields: [societyId], references: [id], onDelete: Restrict)
+  vehicle         Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  flat            Flat          @relation(fields: [flatId], references: [id], onDelete: Restrict)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([societyId, status, startTime])
+  @@index([vehicleId, startTime, endTime])
+  @@index([flatId, createdAt])
+  @@index([userId, createdAt])
+}
