@@ -180,7 +180,7 @@ export default function BookVehicleScreen() {
           {availability.data.available && availability.data.availableVehicles.length > 0 ? (
             <View style={styles.vehicleList}>
               <Text style={styles.vehicleListTitle}>Select a vehicle:</Text>
-              {availability.data.availableVehicles.map((vehicle) => (
+              {availability.data?.availableVehicles.map((vehicle: { id: string, name: string, registrationNumber: string }) => (
                 <TouchableOpacity
                   key={vehicle.id}
                   activeOpacity={0.7}

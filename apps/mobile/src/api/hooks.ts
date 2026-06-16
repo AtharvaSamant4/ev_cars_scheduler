@@ -14,15 +14,18 @@ import type {
   ResidentSession,
 } from "@/src/types/api";
 
+
 export const queryKeys = {
   dashboard: ["dashboard"] as const,
+  driverDashboard: ["driverDashboard"] as const,
   bookings: (view: "upcoming" | "history") => ["bookings", view] as const,
   booking: (id: string) => ["booking", id] as const,
+  wallet: ["wallet"] as const,
 };
 
 export function useResidentLogin() {
   return useMutation({
-    mutationFn: (input: { flatNumber: string; password: string }) =>
+    mutationFn: (input: { flatNumber: string; password?: string }) =>
       apiRequest<ResidentSession>("/auth/resident/login", {
         method: "POST",
         body: JSON.stringify(input),
@@ -30,10 +33,87 @@ export function useResidentLogin() {
   });
 }
 
+export function useDriverLogin() {
+  return useMutation({
+    mutationFn: (input: { phone: string; password?: string }) =>
+      apiRequest<ResidentSession>("/auth/driver/login", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+  });
+}
+
+export function useVerifyOtp(bookingId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (otp: string) =>
+      apiRequest<{ success: boolean }>(`/driver/bookings/${bookingId}/verify-otp`, {
+        method: "POST",
+        body: JSON.stringify({ otp }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.driverDashboard,
+      });
+    },
+  });
+}
+
+export function useCompleteTrip(bookingId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () =>
+      apiRequest<{ success: boolean }>(`/driver/bookings/${bookingId}/complete`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.driverDashboard });
+    },
+  });
+}
+
+export function useWallet() {
+  return useQuery({
+    queryKey: queryKeys.wallet,
+    queryFn: () => apiRequest<any>("/wallet"),
+  });
+}
+
 export function useDashboard() {
   return useQuery({
     queryKey: queryKeys.dashboard,
     queryFn: () => apiRequest<Dashboard>("/dashboard"),
+  });
+}
+
+export function useDriverDashboard() {
+  return useQuery({
+    queryKey: queryKeys.driverDashboard,
+    queryFn: () => apiRequest<any>("/driver/dashboard"),
+  });
+}
+
+export function useDriverHistory() {
+  return useQuery({
+    queryKey: ["driver", "history"],
+    queryFn: () => apiRequest<any[]>("/driver/bookings/history"),
+  });
+}
+
+export function useReportIssue() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () =>
+      apiRequest<{ success: boolean }>("/driver/vehicle/report-issue", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.driverDashboard });
+    },
   });
 }
 

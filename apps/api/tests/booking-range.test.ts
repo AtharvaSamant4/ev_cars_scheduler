@@ -17,6 +17,7 @@ describe("normalizeBookingRange", () => {
 
     expect(result.durationMinutes).toBe(150);
     expect(result.quotaYear).toBe(2030);
+    expect(result.quotaWeek).toBe(24);
   });
 
   it("rejects bookings in the past", () => {

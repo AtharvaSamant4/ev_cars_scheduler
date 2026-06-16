@@ -67,6 +67,10 @@ export function AdminPortal({ section }: { section: string }) {
       <BookingsScreen />
     ) : section === "vehicle-status" ? (
       <VehicleStatusScreen />
+    ) : section === "drivers" ? (
+      <DriversScreen />
+    ) : section === "wallets" ? (
+      <WalletsScreen />
     ) : (
       <DashboardScreen />
     );
@@ -192,6 +196,7 @@ function VehiclesScreen() {
                   <tr>
                     <th>Vehicle Name</th>
                     <th>Registration Number</th>
+                    <th>Reserve</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -201,6 +206,13 @@ function VehiclesScreen() {
                     <tr key={vehicle.id}>
                       <td>{vehicle.name}</td>
                       <td>{vehicle.registrationNumber}</td>
+                      <td>
+                        {vehicle.isReserve ? (
+                          <span className="badge reserve-badge">RESERVE</span>
+                        ) : (
+                          <span className="badge normal-badge">NORMAL</span>
+                        )}
+                      </td>
                       <td>
                         <StatusPill value={vehicle.status} />
                       </td>
@@ -255,6 +267,7 @@ function VehicleForm({
 }) {
   const [name, setName] = useState("");
   const [registrationNumber, setRegistrationNumber] = useState("");
+  const [isReserve, setIsReserve] = useState("false");
   const [status, setStatus] = useState<VehicleStatus>("AVAILABLE");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -263,6 +276,7 @@ function VehicleForm({
     queueMicrotask(() => {
       setName(editing?.name ?? "");
       setRegistrationNumber(editing?.registrationNumber ?? "");
+      setIsReserve(editing?.isReserve ? "true" : "false");
       setStatus(editing?.status ?? "AVAILABLE");
     });
   }, [editing]);
@@ -275,7 +289,7 @@ function VehicleForm({
     try {
       await adminApi(editing ? `/admin/vehicles/${editing.id}` : "/admin/vehicles", {
         method: editing ? "PATCH" : "POST",
-        body: JSON.stringify({ name, registrationNumber, status }),
+        body: JSON.stringify({ name, registrationNumber, status, isReserve: isReserve === "true" }),
       });
       setMessage(editing ? "Vehicle updated." : "Vehicle created.");
       onSaved();
@@ -292,6 +306,16 @@ function VehicleForm({
         label="Registration Number"
         value={registrationNumber}
         onChange={setRegistrationNumber}
+      />
+      <SelectField
+        label="Reserve Vehicle"
+        value={isReserve}
+        options={["false", "true"]}
+        labels={{
+          "false": "No (Normal)",
+          "true": "Yes (Reserve)",
+        }}
+        onChange={(value) => setIsReserve(value)}
       />
       <SelectField
         label="Status"
@@ -676,7 +700,7 @@ function QuotaScreen() {
     <>
       <PageHeader
         title="Quota Management"
-        subtitle="Review annual allocation, used hours, and remaining hours per flat."
+        subtitle="Review weekly allocation, used hours, and remaining hours per flat."
       />
       <DataCard state={flats}>
         {(data) => (
@@ -984,3 +1008,270 @@ function SelectField({
     </label>
   );
 }
+
+function DriversScreen() {
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(25);
+  const drivers = useAdminData(
+    () => adminApi<Paginated<any>>(`/admin/drivers?page=${page}&pageSize=${pageSize}`),
+    [page, pageSize],
+  );
+  const vehicles = useAdminData(
+    () => adminApi<Paginated<Vehicle>>(`/admin/vehicles?pageSize=100`),
+    [],
+  );
+
+  return (
+    <>
+      <PageHeader
+        title="Drivers"
+        subtitle="Manage drivers and assign them to vehicles."
+      />
+
+      <div className="grid two-col">
+        <DataCard state={drivers}>
+          {(data) => (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Assigned Vehicle</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((item: any) => (
+                    <tr key={item.id}>
+                      <td>{item.name}</td>
+                      <td>{item.phone}</td>
+                      <td>{item.driver?.vehicle?.registrationNumber || "None"}</td>
+                      <td>
+                        <select
+                          className="input"
+                          style={{ maxWidth: 160, margin: 0, height: 32, fontSize: 13 }}
+                          value={item.driver?.vehicleId || ""}
+                          onChange={(e) => {
+                            const vehicleId = e.target.value || null;
+                            adminApi(`/admin/drivers/${item.id}/vehicle`, {
+                              method: "PUT",
+                              body: JSON.stringify({ vehicleId }),
+                            }).then(() => drivers.reload());
+                          }}
+                        >
+                          <option value="">Unassigned</option>
+                          {vehicles.data?.items.map((v: Vehicle) => (
+                            <option key={v.id} value={v.id}>
+                              {v.registrationNumber} ({v.name})
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </DataCard>
+        <DriverForm onSaved={() => drivers.reload()} />
+      </div>
+    </>
+  );
+}
+
+function DriverForm({ onSaved }: { onSaved: () => void }) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+
+    try {
+      await adminApi("/admin/drivers", {
+        method: "POST",
+        body: JSON.stringify({ name, phone, password: "Driver@123" }),
+      });
+      setMessage("Driver created successfully.");
+      setName("");
+      setPhone("");
+      onSaved();
+    } catch (currentError) {
+      setError(errorMessage(currentError));
+    }
+  }
+
+  return (
+    <form className="card form-card" onSubmit={submit}>
+      <h2 className="panel-title">Add Driver</h2>
+      <TextField label="Driver Name" value={name} onChange={setName} />
+      <TextField label="Phone Number" value={phone} onChange={setPhone} />
+      <div className="muted" style={{ fontSize: 13, marginBottom: 16 }}>
+        Default password is set to <strong>Driver@123</strong>.
+      </div>
+      <Message error={error} success={message} />
+      <div className="actions">
+        <button className="button" type="submit">
+          Create Driver
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function WalletsScreen() {
+  const wallets = useAdminData(
+    () => adminApi<any>("/admin/wallets"),
+    [],
+  );
+  const [adjustingUser, setAdjustingUser] = useState<any | null>(null);
+
+  return (
+    <>
+      <PageHeader
+        title="Wallets"
+        subtitle="Manage resident wallets and adjust balances."
+      />
+      <div className="grid two-col">
+        <DataCard state={wallets}>
+          {(data) => (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Resident</th>
+                    <th>Flat</th>
+                    <th>Current Balance</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.map((item: any) => (
+                    <tr key={item.userId}>
+                      <td>
+                        <strong>{item.name}</strong>
+                        <div className="muted">{item.phone}</div>
+                      </td>
+                      <td>{item.flat || "None"}</td>
+                      <td>
+                        <strong style={{ color: "var(--success)", fontSize: 18 }}>
+                          ₹{item.balance}
+                        </strong>
+                      </td>
+                      <td>
+                        <button
+                          className="button secondary"
+                          onClick={() => setAdjustingUser(item)}
+                        >
+                          Adjust Balance
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </DataCard>
+        {adjustingUser ? (
+          <WalletAdjustForm
+            user={adjustingUser}
+            onCancel={() => setAdjustingUser(null)}
+            onSaved={() => {
+              setAdjustingUser(null);
+              void wallets.reload();
+            }}
+          />
+        ) : (
+          <div className="card form-card">
+            <h2 className="panel-title">Adjust Balance</h2>
+            <div className="muted">
+              Select a resident from the list to adjust their wallet balance.
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function WalletAdjustForm({
+  user,
+  onCancel,
+  onSaved,
+}: {
+  user: any;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [amountStr, setAmountStr] = useState("");
+  const [typeStr, setTypeStr] = useState("CREDIT");
+  const [description, setDescription] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+
+    const amount = parseInt(amountStr, 10);
+    if (isNaN(amount) || amount <= 0) {
+      setError("Please enter a valid positive amount.");
+      return;
+    }
+
+    try {
+      await adminApi(`/admin/wallets/${user.userId}/adjust`, {
+        method: "POST",
+        body: JSON.stringify({
+          amount,
+          type: typeStr,
+          description: description.trim() || "Manual adjustment",
+        }),
+      });
+      setMessage("Wallet adjusted successfully.");
+      onSaved();
+    } catch (currentError) {
+      setError(errorMessage(currentError));
+    }
+  }
+
+  return (
+    <form className="card form-card" onSubmit={submit}>
+      <h2 className="panel-title">Adjust Wallet: {user.name}</h2>
+      <TextField
+        label="Amount (₹)"
+        type="number"
+        value={amountStr}
+        onChange={setAmountStr}
+      />
+      <SelectField
+        label="Transaction Type"
+        value={typeStr}
+        options={["CREDIT", "DEBIT", "REFUND"]}
+        onChange={setTypeStr}
+      />
+      <TextField
+        label="Description"
+        value={description}
+        onChange={setDescription}
+      />
+      <Message error={error} success={message} />
+      <div className="actions">
+        <button className="button" type="submit">
+          Apply Adjustment
+        </button>
+        <button className="button secondary" type="button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+

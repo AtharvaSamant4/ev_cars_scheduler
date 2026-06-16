@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 
-import { useResidentLogin } from "@/src/api/hooks";
+import { useResidentLogin, useDriverLogin } from "@/src/api/hooks";
 import { Button } from "@/src/components/button";
 import { Card } from "@/src/components/card";
 import { Screen } from "@/src/components/screen";
@@ -21,20 +21,31 @@ export default function LoginScreen() {
   const router = useRouter();
   const setSession = useAuthStore((state) => state.setSession);
   const login = useResidentLogin();
+  const driverLoginQuery = useDriverLogin();
   const [flatNumber, setFlatNumber] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [isDriver, setIsDriver] = useState(false);
 
   const submit = async () => {
     setMessage(null);
 
     try {
-      const session = await login.mutateAsync({
-        flatNumber: flatNumber.trim().toUpperCase(),
-        password,
-      });
-      await setSession(session);
-      router.replace("/(tabs)");
+      if (isDriver) {
+        const session = await driverLoginQuery.mutateAsync({
+          phone: flatNumber.trim(),
+          password,
+        });
+        await setSession(session);
+        router.replace("/(driver)");
+      } else {
+        const session = await login.mutateAsync({
+          flatNumber: flatNumber.trim().toUpperCase(),
+          password,
+        });
+        await setSession(session);
+        router.replace("/(tabs)");
+      }
     } catch (error) {
       setMessage(errorMessage(error));
     }
@@ -52,18 +63,20 @@ export default function LoginScreen() {
           </View>
           <Text style={styles.title}>Your society car, when you need it.</Text>
           <Text style={styles.subtitle}>
-            Reserve an electric vehicle and keep track of your annual quota.
+            Reserve an electric vehicle and keep track of your weekly quota.
           </Text>
         </View>
 
         <Card style={styles.form}>
-          <Text style={styles.formTitle}>Resident login</Text>
+          <Text style={styles.formTitle}>
+            {isDriver ? "Driver login" : "Resident login"}
+          </Text>
           <TextField
             autoCapitalize="characters"
             autoCorrect={false}
-            label="Flat number"
+            label={isDriver ? "Phone number" : "Flat number"}
             onChangeText={setFlatNumber}
-            placeholder="A101"
+            placeholder={isDriver ? "Enter phone" : "A101"}
             returnKeyType="next"
             value={flatNumber}
           />
@@ -80,15 +93,27 @@ export default function LoginScreen() {
           <Button
             disabled={!flatNumber.trim() || password.length < 8}
             label="Login"
-            loading={login.isPending}
+            loading={login.isPending || driverLoginQuery.isPending}
             onPress={() => void submit()}
           />
+          {!isDriver && (
+            <Button
+              label="Use demo account"
+              variant="secondary"
+              onPress={() => {
+                setFlatNumber("A101");
+                setPassword("Demo@123");
+                setMessage(null);
+              }}
+            />
+          )}
           <Button
-            label="Use demo account"
+            label={isDriver ? "Switch to Resident" : "Login as Driver"}
             variant="secondary"
             onPress={() => {
-              setFlatNumber("A101");
-              setPassword("Demo@123");
+              setIsDriver(!isDriver);
+              setFlatNumber("");
+              setPassword("");
               setMessage(null);
             }}
           />

@@ -10,6 +10,7 @@ datasource db {
 enum UserRole {
   RESIDENT
   ADMIN
+  DRIVER
 }
 
 enum VehicleStatus {
@@ -20,8 +21,22 @@ enum VehicleStatus {
 
 enum BookingStatus {
   BOOKED
+  ACTIVE
   COMPLETED
   CANCELLED
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+  REFUND
+}
+
+enum ReassignReason {
+  LATE_RETURN
+  BREAKDOWN
+  MAINTENANCE
+  EMERGENCY
 }
 
 model Society {
@@ -67,6 +82,9 @@ model User {
   society      Society   @relation(fields: [societyId], references: [id], onDelete: Restrict)
   flat         Flat?     @relation(fields: [flatId], references: [id], onDelete: Restrict)
   bookings     Booking[]
+  driver             Driver?
+  wallet             Wallet?
+  reassignedBookings Booking[] @relation("BookingReassignedBy")
 
   @@index([societyId, role, isActive])
 }
@@ -77,10 +95,13 @@ model Vehicle {
   name               String        @db.VarChar(80)
   registrationNumber String        @db.VarChar(32)
   status             VehicleStatus @default(AVAILABLE)
+  isReserve          Boolean       @default(false)
   createdAt          DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime      @updatedAt @db.Timestamptz(3)
   society            Society       @relation(fields: [societyId], references: [id], onDelete: Restrict)
   bookings           Booking[]
+  reassignedBookings Booking[]     @relation("BookingReassignedVehicle")
+  drivers            Driver[]
 
   @@unique([societyId, registrationNumber])
   @@index([societyId, status])
@@ -90,14 +111,15 @@ model FlatQuota {
   id               String   @id @default(uuid()) @db.Uuid
   flatId           String   @db.Uuid
   year             Int      @db.SmallInt
+  weekNumber       Int      @db.SmallInt
   allocatedMinutes Int
   usedMinutes      Int      @default(0)
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
   updatedAt        DateTime @updatedAt @db.Timestamptz(3)
   flat             Flat     @relation(fields: [flatId], references: [id], onDelete: Cascade)
 
-  @@unique([flatId, year])
-  @@index([year])
+  @@unique([flatId, year, weekNumber])
+  @@index([year, weekNumber])
 }
 
 model Booking {
@@ -107,20 +129,68 @@ model Booking {
   flatId          String        @db.Uuid
   userId          String        @db.Uuid
   quotaYear       Int           @db.SmallInt
+  quotaWeek       Int           @db.SmallInt
   startTime       DateTime      @db.Timestamptz(3)
   endTime         DateTime      @db.Timestamptz(3)
   durationMinutes Int
   status          BookingStatus @default(BOOKED)
+  otp             String?       @db.VarChar(6)
+  otpAttempts     Int           @default(0)
+  otpVerified     Boolean       @default(false)
+  startedAt       DateTime?     @db.Timestamptz(3)
   cancelledAt     DateTime?     @db.Timestamptz(3)
   createdAt       DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
-  society         Society       @relation(fields: [societyId], references: [id], onDelete: Restrict)
-  vehicle         Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
-  flat            Flat          @relation(fields: [flatId], references: [id], onDelete: Restrict)
-  user            User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  society             Society         @relation(fields: [societyId], references: [id], onDelete: Restrict)
+  vehicle             Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  flat                Flat            @relation(fields: [flatId], references: [id], onDelete: Restrict)
+  user                User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  reassignedVehicleId String?         @db.Uuid
+  reassignedAt        DateTime?       @db.Timestamptz(3)
+  reassignedReason    ReassignReason?
+  reassignedByUserId  String?         @db.Uuid
+
+  reassignedVehicle   Vehicle?        @relation("BookingReassignedVehicle", fields: [reassignedVehicleId], references: [id], onDelete: Restrict)
+  reassignedByUser    User?           @relation("BookingReassignedBy", fields: [reassignedByUserId], references: [id], onDelete: Restrict)
 
   @@index([societyId, status, startTime])
   @@index([vehicleId, startTime, endTime])
   @@index([flatId, createdAt])
   @@index([userId, createdAt])
+}
+
+model Driver {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid
+  vehicleId String?  @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
+  @@index([vehicleId])
+}
+
+model Wallet {
+  id        String              @id @default(uuid()) @db.Uuid
+  userId    String              @unique @db.Uuid
+  balance   Int                 @default(0)
+  createdAt DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime            @updatedAt @db.Timestamptz(3)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id          String          @id @default(uuid()) @db.Uuid
+  walletId    String          @db.Uuid
+  amount      Int
+  type        TransactionType
+  description String          @db.VarChar(255)
+  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime        @updatedAt @db.Timestamptz(3)
+  wallet      Wallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, createdAt])
 }

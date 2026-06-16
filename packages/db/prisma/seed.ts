@@ -10,6 +10,19 @@ import {
   VehicleStatus,
 } from "../src/generated/prisma/client";
 
+function getIsoWeek(date: Date): { year: number; week: number } {
+  const target = new Date(date.valueOf());
+  const dayNr = (date.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3);
+  const firstThursday = target.valueOf();
+  target.setMonth(0, 1);
+  if (target.getDay() !== 4) {
+    target.setMonth(0, 1 + ((4 - target.getDay() + 7) % 7));
+  }
+  const week = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+  return { year: target.getFullYear(), week };
+}
+
 const SOCIETY_ID = "00000000-0000-4000-8000-000000000001";
 const ADMIN_ID = "00000000-0000-4000-8000-000000000002";
 const BOOKING_IDS = [
@@ -17,10 +30,14 @@ const BOOKING_IDS = [
   "00000000-0000-4000-8000-000000000102",
   "00000000-0000-4000-8000-000000000103",
   "00000000-0000-4000-8000-000000000104",
+  "00000000-0000-4000-8000-000000000105",
+  "00000000-0000-4000-8000-000000000106",
+  "00000000-0000-4000-8000-000000000107",
 ];
 
 const CURRENT_YEAR = new Date().getFullYear();
-const ANNUAL_QUOTA_MINUTES = 876 * 60;
+const CURRENT_WEEK = getIsoWeek(new Date()).week;
+const WEEKLY_QUOTA_MINUTES = 16 * 60;
 const RESIDENT_PASSWORD = "Demo@123";
 const ADMIN_PASSWORD = "Admin@123";
 
@@ -89,18 +106,20 @@ async function main() {
 
       await prisma.flatQuota.upsert({
         where: {
-          flatId_year: {
+          flatId_year_weekNumber: {
             flatId: flat.id,
             year: CURRENT_YEAR,
+            weekNumber: CURRENT_WEEK,
           },
         },
         update: {
-          allocatedMinutes: ANNUAL_QUOTA_MINUTES,
+          allocatedMinutes: WEEKLY_QUOTA_MINUTES,
         },
         create: {
           flatId: flat.id,
           year: CURRENT_YEAR,
-          allocatedMinutes: ANNUAL_QUOTA_MINUTES,
+          weekNumber: CURRENT_WEEK,
+          allocatedMinutes: WEEKLY_QUOTA_MINUTES,
         },
       });
 
@@ -178,6 +197,43 @@ async function main() {
       vehicles.push(vehicle);
     }
 
+    const driverPasswordHash = await hash("Driver@123", 12);
+    const drivers = [];
+
+    for (let i = 0; i < 5; i++) {
+      const driverPhone = `800000000${i + 1}`;
+      const driverUser = await prisma.user.upsert({
+        where: { phone: driverPhone },
+        update: {
+          societyId: society.id,
+          role: UserRole.DRIVER,
+          name: `Driver ${i + 1}`,
+          passwordHash: driverPasswordHash,
+          isActive: true,
+        },
+        create: {
+          societyId: society.id,
+          role: UserRole.DRIVER,
+          name: `Driver ${i + 1}`,
+          phone: driverPhone,
+          passwordHash: driverPasswordHash,
+        },
+      });
+
+      const driverProfile = await prisma.driver.upsert({
+        where: { userId: driverUser.id },
+        update: {
+          vehicleId: vehicles[i].id,
+        },
+        create: {
+          userId: driverUser.id,
+          vehicleId: vehicles[i].id,
+        },
+      });
+
+      drivers.push(driverProfile);
+    }
+
     const residents = await prisma.user.findMany({
       where: {
         flatId: { in: flats.slice(0, 3).map((flat) => flat.id) },
@@ -199,7 +255,8 @@ async function main() {
         vehicleId: vehicles[0].id,
         flatId: flats[0].id,
         userId: residentByFlatId.get(flats[0].id)!.id,
-        quotaYear: CURRENT_YEAR,
+        quotaYear: getIsoWeek(localDate(CURRENT_YEAR, 1, 15, 9)).year,
+        quotaWeek: getIsoWeek(localDate(CURRENT_YEAR, 1, 15, 9)).week,
         startTime: localDate(CURRENT_YEAR, 1, 15, 9),
         endTime: localDate(CURRENT_YEAR, 1, 15, 11),
         durationMinutes: 120,
@@ -211,7 +268,8 @@ async function main() {
         vehicleId: vehicles[1].id,
         flatId: flats[1].id,
         userId: residentByFlatId.get(flats[1].id)!.id,
-        quotaYear: CURRENT_YEAR,
+        quotaYear: getIsoWeek(localDate(CURRENT_YEAR, 2, 20, 14)).year,
+        quotaWeek: getIsoWeek(localDate(CURRENT_YEAR, 2, 20, 14)).week,
         startTime: localDate(CURRENT_YEAR, 2, 20, 14),
         endTime: localDate(CURRENT_YEAR, 2, 20, 17),
         durationMinutes: 180,
@@ -223,7 +281,8 @@ async function main() {
         vehicleId: vehicles[0].id,
         flatId: flats[0].id,
         userId: residentByFlatId.get(flats[0].id)!.id,
-        quotaYear: CURRENT_YEAR,
+        quotaYear: getIsoWeek(localDate(CURRENT_YEAR, 12, 15, 9)).year,
+        quotaWeek: getIsoWeek(localDate(CURRENT_YEAR, 12, 15, 9)).week,
         startTime: localDate(CURRENT_YEAR, 12, 15, 9),
         endTime: localDate(CURRENT_YEAR, 12, 15, 13),
         durationMinutes: 240,
@@ -235,12 +294,53 @@ async function main() {
         vehicleId: vehicles[2].id,
         flatId: flats[2].id,
         userId: residentByFlatId.get(flats[2].id)!.id,
-        quotaYear: CURRENT_YEAR,
+        quotaYear: getIsoWeek(localDate(CURRENT_YEAR, 11, 10, 10)).year,
+        quotaWeek: getIsoWeek(localDate(CURRENT_YEAR, 11, 10, 10)).week,
         startTime: localDate(CURRENT_YEAR, 11, 10, 10),
         endTime: localDate(CURRENT_YEAR, 11, 10, 12),
         durationMinutes: 120,
         status: BookingStatus.CANCELLED,
         cancelledAt: new Date(),
+      },
+      {
+        id: BOOKING_IDS[4],
+        societyId: society.id,
+        vehicleId: vehicles[3].id,
+        flatId: flats[0].id,
+        userId: residentByFlatId.get(flats[0].id)!.id,
+        quotaYear: getIsoWeek(localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate(), 14)).year,
+        quotaWeek: getIsoWeek(localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate(), 14)).week,
+        startTime: localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate(), 14),
+        endTime: localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate(), 16),
+        durationMinutes: 120,
+        status: BookingStatus.ACTIVE,
+        startedAt: new Date(),
+      },
+      {
+        id: BOOKING_IDS[5],
+        societyId: society.id,
+        vehicleId: vehicles[4].id,
+        flatId: flats[1].id,
+        userId: residentByFlatId.get(flats[1].id)!.id,
+        quotaYear: getIsoWeek(localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate() + 1, 10)).year,
+        quotaWeek: getIsoWeek(localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate() + 1, 10)).week,
+        startTime: localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate() + 1, 10),
+        endTime: localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate() + 1, 14),
+        durationMinutes: 240,
+        status: BookingStatus.BOOKED,
+      },
+      {
+        id: BOOKING_IDS[6],
+        societyId: society.id,
+        vehicleId: vehicles[3].id,
+        flatId: flats[2].id,
+        userId: residentByFlatId.get(flats[2].id)!.id,
+        quotaYear: getIsoWeek(localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate() - 1, 10)).year,
+        quotaWeek: getIsoWeek(localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate() - 1, 10)).week,
+        startTime: localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate() - 1, 10),
+        endTime: localDate(CURRENT_YEAR, new Date().getMonth() + 1, new Date().getDate() - 1, 12),
+        durationMinutes: 120,
+        status: BookingStatus.COMPLETED,
       },
     ];
 
@@ -264,9 +364,10 @@ async function main() {
     for (const flat of flats) {
       await prisma.flatQuota.update({
         where: {
-          flatId_year: {
+          flatId_year_weekNumber: {
             flatId: flat.id,
             year: CURRENT_YEAR,
+            weekNumber: CURRENT_WEEK,
           },
         },
         data: {
@@ -280,9 +381,10 @@ async function main() {
     console.log(`Society: ${society.name}`);
     console.log(`Flats/residents: ${flats.length}`);
     console.log(`Vehicles: ${vehicles.length}`);
-    console.log(`Annual quota: ${ANNUAL_QUOTA_MINUTES / 60} hours`);
+    console.log(`Weekly quota: ${WEEKLY_QUOTA_MINUTES / 60} hours`);
     console.log(`Resident login: A101 / ${RESIDENT_PASSWORD}`);
     console.log(`Admin login: admin@greenmeadows.demo / ${ADMIN_PASSWORD}`);
+    console.log(`Driver login: 8000000001 / Driver@123`);
   } finally {
     await prisma.$disconnect();
   }

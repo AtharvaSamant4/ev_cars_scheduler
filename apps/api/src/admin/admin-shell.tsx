@@ -15,6 +15,8 @@ const navItems = [
   ["quota", "Quota"],
   ["bookings", "Bookings"],
   ["vehicle-status", "Vehicle Status"],
+  ["drivers", "Drivers"],
+  ["wallets", "Wallets"],
 ] as const;
 
 export function AdminShell({ children }: { children: ReactNode }) {

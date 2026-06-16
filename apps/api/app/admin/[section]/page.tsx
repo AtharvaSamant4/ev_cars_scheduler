@@ -8,6 +8,8 @@ const sections = new Set([
   "quota",
   "bookings",
   "vehicle-status",
+  "drivers",
+  "wallets",
 ]);
 
 export default async function AdminSectionPage({

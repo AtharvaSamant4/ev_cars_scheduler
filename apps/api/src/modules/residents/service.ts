@@ -5,8 +5,10 @@ import type { AuthUser } from "@/src/lib/auth";
 import { AppError } from "@/src/lib/errors";
 import {
   bookingResponse,
-  getCurrentQuota,
+  residentFlatId,
+  checkAvailability,
 } from "@/src/modules/bookings/service";
+import { getIsoWeek } from "@/src/lib/date";
 
 function assertResident(user: AuthUser) {
   if (user.role !== UserRole.RESIDENT || !user.flatId) {
@@ -80,6 +82,38 @@ export async function getDashboard(user: AuthUser) {
   };
 }
 
+export async function getCurrentQuota(user: AuthUser) {
+  const flatId = residentFlatId(user);
+  const year = await currentQuotaYear(user.societyId);
+  const week = await currentQuotaWeek(user.societyId);
+
+  const flat = await prisma.flat.findUnique({
+    where: { id: flatId },
+    include: {
+      quotas: {
+        where: {
+          year,
+          weekNumber: week,
+        },
+      },
+    },
+  });
+
+  const quota = flat?.quotas[0];
+  if (quota) {
+    return {
+      ...quota,
+      remainingMinutes: quota.allocatedMinutes - quota.usedMinutes,
+    };
+  }
+
+  return {
+    allocatedMinutes: 16 * 60,
+    usedMinutes: 0,
+    remainingMinutes: 16 * 60,
+  };
+}
+
 export async function currentQuotaYear(societyId: string) {
   const society = await prisma.society.findUnique({
     where: { id: societyId },
@@ -90,5 +124,18 @@ export async function currentQuotaYear(societyId: string) {
     throw new AppError(404, "NOT_FOUND", "Society not found");
   }
 
-  return toZonedTime(new Date(), society.timezone).getFullYear();
+  return getIsoWeek(new Date()).year;
+}
+
+export async function currentQuotaWeek(societyId: string) {
+  const society = await prisma.society.findUnique({
+    where: { id: societyId },
+    select: { timezone: true },
+  });
+
+  if (!society) {
+    throw new AppError(404, "NOT_FOUND", "Society not found");
+  }
+
+  return getIsoWeek(new Date()).week;
 }

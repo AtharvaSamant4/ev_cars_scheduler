@@ -13,9 +13,12 @@ export function QuotaCard({ quota }: { quota: Quota }) {
 
   return (
     <Card style={styles.card}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Weekly Quota</Text>
+        <Text style={styles.subtitle}>Resets automatically on Monday</Text>
+      </View>
       <View style={styles.heading}>
         <View>
-          <Text style={styles.eyebrow}>{quota.year} QUOTA</Text>
           <Text style={styles.remaining}>
             {hoursLabel(quota.remainingMinutes)}
           </Text>
@@ -52,6 +55,18 @@ function QuotaStat({ label, value }: { label: string; value: string }) {
 const styles = StyleSheet.create({
   card: {
     gap: spacing.md,
+  },
+  header: {
+    gap: spacing.xs,
+  },
+  title: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  subtitle: {
+    color: colors.textMuted,
+    fontSize: 14,
   },
   heading: {
     flexDirection: "row",

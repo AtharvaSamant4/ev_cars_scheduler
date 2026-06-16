@@ -40,6 +40,7 @@ export const vehicleCreateSchema = z.object({
   name: z.string().trim().min(1).max(80),
   registrationNumber: z.string().trim().min(3).max(32),
   status: z.enum(["AVAILABLE", "MAINTENANCE", "INACTIVE"]).optional(),
+  isReserve: z.boolean().optional(),
 });
 
 export const vehicleUpdateSchema = vehicleCreateSchema.partial().refine(
@@ -87,15 +88,36 @@ export const residentUpdateSchema = z
   );
 
 export const adminBookingListQuerySchema = paginationQuerySchema.extend({
-  from: z.iso.datetime({ offset: true }).optional(),
-  to: z.iso.datetime({ offset: true }).optional(),
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
   status: z.enum(["BOOKED", "COMPLETED", "CANCELLED"]).optional(),
-  flatId: z.uuid().optional(),
-  vehicleId: z.uuid().optional(),
+  flatId: z.string().uuid().optional(),
+  vehicleId: z.string().uuid().optional(),
 });
 
 export const adminEntityListQuerySchema = paginationQuerySchema.extend({
-  isActive: optionalBooleanQuery,
+  isActive: z.coerce.boolean().optional(),
+});
+
+export const driverLoginSchema = z.object({
+  phone: z.string().min(1, "Phone is required"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+export const driverCreateSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters"),
+  phone: z.string().min(5, "Phone is required"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+export const driverUpdateSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters").optional(),
+  phone: z.string().min(5, "Phone is required").optional(),
+  password: z.string().min(8, "Password must be at least 8 characters").optional(),
+});
+
+export const driverAssignVehicleSchema = z.object({
+  vehicleId: z.string().uuid("Invalid vehicle ID").nullable(),
 });
 
 export type BookingRangeInput = z.infer<typeof bookingRangeSchema>;

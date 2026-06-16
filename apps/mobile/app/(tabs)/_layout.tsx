@@ -63,6 +63,15 @@ export default function TabsLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="wallet"
+        options={{
+          title: "Wallet",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons color={color} name="wallet-outline" size={size} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

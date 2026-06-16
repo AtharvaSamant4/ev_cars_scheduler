@@ -3,10 +3,13 @@ import {
   Prisma,
   prisma,
   UserRole,
+  TransactionType,
+  ReassignReason,
 } from "@society-ev/db";
 import { toZonedTime } from "date-fns-tz";
 
 import type { AuthUser } from "@/src/lib/auth";
+import { getIsoWeek } from "@/src/lib/date";
 import { AppError } from "@/src/lib/errors";
 import { paginated, pagination } from "@/src/lib/pagination";
 
@@ -15,6 +18,7 @@ type NormalizedRange = {
   endTime: Date;
   durationMinutes: number;
   quotaYear: number;
+  quotaWeek: number;
 };
 
 type LockedQuota = {
@@ -27,7 +31,7 @@ type LockedVehicle = {
   id: string;
 };
 
-function residentFlatId(user: AuthUser) {
+export function residentFlatId(user: AuthUser) {
   if (user.role !== UserRole.RESIDENT || !user.flatId) {
     throw new AppError(403, "FORBIDDEN", "A resident account is required");
   }
@@ -113,11 +117,14 @@ export function normalizeBookingRange(
     );
   }
 
+  const isoDate = getIsoWeek(localStart);
+
   return {
     startTime,
     endTime,
     durationMinutes,
-    quotaYear: localStart.getFullYear(),
+    quotaYear: isoDate.year,
+    quotaWeek: isoDate.week,
   };
 }
 
@@ -213,25 +220,6 @@ async function serializable<T>(operation: () => Promise<T>) {
   throw new AppError(409, "BOOKING_CONFLICT", "Please retry the booking");
 }
 
-export async function getCurrentQuota(user: AuthUser) {
-  const flatId = residentFlatId(user);
-  const timezone = await societyTimezone(user.societyId);
-  const year = toZonedTime(new Date(), timezone).getFullYear();
-  const quota = await prisma.flatQuota.findUnique({
-    where: { flatId_year: { flatId, year } },
-  });
-
-  if (!quota) {
-    throw new AppError(
-      409,
-      "QUOTA_NOT_ALLOCATED",
-      `No quota is allocated for ${year}`,
-    );
-  }
-
-  return quotaResponse(quota);
-}
-
 export async function checkAvailability(
   user: AuthUser,
   startValue: string,
@@ -244,9 +232,10 @@ export async function checkAvailability(
   const [quota, availableVehicles] = await Promise.all([
     prisma.flatQuota.findUnique({
       where: {
-        flatId_year: {
+        flatId_year_weekNumber: {
           flatId,
           year: range.quotaYear,
+          weekNumber: range.quotaWeek,
         },
       },
     }),
@@ -254,11 +243,12 @@ export async function checkAvailability(
       where: {
         societyId: user.societyId,
         status: "AVAILABLE",
+        isReserve: false,
         bookings: {
           none: {
             status: { not: BookingStatus.CANCELLED },
-            startTime: { lt: range.endTime },
-            endTime: { gt: range.startTime },
+            startTime: { lt: new Date(range.endTime.getTime() + 30 * 60000) },
+            endTime: { gt: new Date(range.startTime.getTime() - 30 * 60000) },
           },
         },
       },
@@ -313,6 +303,7 @@ export async function createBooking(
           FROM "FlatQuota"
           WHERE "flatId" = ${flatId}::uuid
             AND "year" = ${range.quotaYear}
+            AND "weekNumber" = ${range.quotaWeek}
           FOR UPDATE
         `;
         const quota = quotaRows[0];
@@ -337,20 +328,21 @@ export async function createBooking(
         }
 
         const vehicles = await tx.$queryRaw<LockedVehicle[]>`
-          SELECT vehicle."id"
-          FROM "Vehicle" AS vehicle
-          WHERE vehicle."id" = ${vehicleId}::uuid
-            AND vehicle."societyId" = ${user.societyId}::uuid
-            AND vehicle."status" = 'AVAILABLE'
+          SELECT id 
+          FROM "Vehicle" 
+          WHERE "societyId" = ${user.societyId}::uuid 
+            AND "id" = ${vehicleId}::uuid
+            AND "status" = 'AVAILABLE'
+            AND "isReserve" = false
             AND NOT EXISTS (
-              SELECT 1
-              FROM "Booking" AS booking
-              WHERE booking."vehicleId" = vehicle."id"
-                AND booking."status" <> 'CANCELLED'
-                AND booking."startTime" < ${range.endTime}
-                AND booking."endTime" > ${range.startTime}
+              SELECT 1 
+              FROM "Booking" 
+              WHERE "vehicleId" = ${vehicleId}::uuid
+                AND "status" != 'CANCELLED'
+                AND "startTime" < ${new Date(range.endTime.getTime() + 30 * 60000)}
+                AND "endTime" > ${new Date(range.startTime.getTime() - 30 * 60000)}
             )
-          FOR UPDATE OF vehicle
+          FOR UPDATE
         `;
         const vehicle = vehicles[0];
 
@@ -362,6 +354,8 @@ export async function createBooking(
           );
         }
 
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
         const booking = await tx.booking.create({
           data: {
             societyId: user.societyId,
@@ -369,9 +363,11 @@ export async function createBooking(
             flatId,
             userId: user.id,
             quotaYear: range.quotaYear,
+            quotaWeek: range.quotaWeek,
             startTime: range.startTime,
             endTime: range.endTime,
             durationMinutes: range.durationMinutes,
+            otp,
           },
           include: {
             vehicle: {
@@ -545,17 +541,72 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
           },
         });
 
-        const updatedQuota = await tx.flatQuota.update({
+        // Apply flat 50rs penalty for cancellation
+        const penalty = 50;
+
+        let wallet = await tx.wallet.findUnique({
+          where: { userId: booking.userId },
+        });
+
+        if (!wallet) {
+          wallet = await tx.wallet.create({
+            data: {
+              userId: booking.userId,
+              balance: 5000,
+              transactions: {
+                create: {
+                  amount: 5000,
+                  type: TransactionType.CREDIT,
+                  description: "Initial Promotional Balance",
+                },
+              },
+            },
+          });
+        }
+
+        const actualPenalty = Math.min(wallet.balance, penalty);
+
+        if (actualPenalty > 0) {
+          await tx.wallet.update({
+            where: { id: wallet.id },
+            data: {
+              balance: wallet.balance - actualPenalty,
+              transactions: {
+                create: {
+                  amount: actualPenalty,
+                  type: TransactionType.DEBIT,
+                  description: `Flat cancellation penalty for booking on ${booking.startTime.toDateString()}`,
+                },
+              },
+            },
+          });
+        }
+
+        const existingQuota = await tx.flatQuota.findUnique({
           where: {
-            flatId_year: {
+            flatId_year_weekNumber: {
               flatId: booking.flatId,
               year: booking.quotaYear,
+              weekNumber: booking.quotaWeek,
             },
           },
-          data: {
-            usedMinutes: { decrement: booking.durationMinutes },
-          },
         });
+
+        let updatedQuota;
+        if (existingQuota) {
+          updatedQuota = await tx.flatQuota.update({
+            where: { id: existingQuota.id },
+            data: {
+              usedMinutes: { decrement: booking.durationMinutes },
+            },
+          });
+        } else {
+          updatedQuota = {
+            year: booking.quotaYear,
+            allocatedMinutes: 0,
+            usedMinutes: 0,
+          };
+        }
 
         return {
           booking: bookingResponse(cancelled),
@@ -568,5 +619,88 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
         timeout: 10_000,
       },
     ),
+  );
+}
+
+export async function reassignBooking(
+  user: AuthUser,
+  bookingId: string,
+  reserveVehicleId: string,
+  reason: ReassignReason,
+) {
+  return serializable(() =>
+    prisma.$transaction(
+      async (tx) => {
+        const bookings = await tx.$queryRaw<any[]>`
+          SELECT * FROM "Booking"
+          WHERE "id" = ${bookingId}::uuid
+            AND "societyId" = ${user.societyId}::uuid
+          FOR UPDATE
+        `;
+        const booking = bookings[0];
+
+        if (!booking) {
+          throw new AppError(404, "NOT_FOUND", "Booking not found");
+        }
+
+        if (booking.status === "CANCELLED" || booking.status === "COMPLETED") {
+          throw new AppError(409, "INVALID_STATUS", "Booking is no longer active");
+        }
+
+        const vehicles = await tx.$queryRaw<LockedVehicle[]>`
+          SELECT id 
+          FROM "Vehicle" 
+          WHERE "societyId" = ${user.societyId}::uuid 
+            AND "id" = ${reserveVehicleId}::uuid
+            AND "status" = 'AVAILABLE'
+            AND "isReserve" = true
+            AND NOT EXISTS (
+              SELECT 1 
+              FROM "Booking" 
+              WHERE ("vehicleId" = ${reserveVehicleId}::uuid OR "reassignedVehicleId" = ${reserveVehicleId}::uuid)
+                AND "status" != 'CANCELLED'
+                AND "startTime" < ${booking.endTime}
+                AND "endTime" > ${booking.startTime}
+            )
+          FOR UPDATE
+        `;
+        const vehicle = vehicles[0];
+
+        if (!vehicle) {
+          throw new AppError(
+            409,
+            "NO_VEHICLE_AVAILABLE",
+            "Reserve vehicle is not available for the selected slot",
+          );
+        }
+
+        const updated = await tx.booking.update({
+          where: { id: bookingId },
+          data: {
+            reassignedVehicleId: vehicle.id,
+            reassignedReason: reason,
+            reassignedAt: new Date(),
+            reassignedByUserId: user.userId,
+          },
+          include: {
+            vehicle: {
+              select: { id: true, name: true, registrationNumber: true },
+            },
+            reassignedVehicle: {
+              select: { id: true, name: true, registrationNumber: true },
+            },
+            user: { select: { id: true, name: true, email: true, phone: true } },
+            flat: { select: { id: true, number: true } },
+          },
+        });
+
+        return bookingResponse(updated);
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5_000,
+        timeout: 10_000,
+      },
+    )
   );
 }

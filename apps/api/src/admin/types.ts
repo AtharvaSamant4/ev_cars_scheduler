@@ -44,6 +44,7 @@ export type Vehicle = {
   name: string;
   registrationNumber: string;
   status: VehicleStatus;
+  isReserve: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -102,9 +103,13 @@ export type Booking = {
   status: BookingStatus;
   effectiveStatus: BookingStatus;
   cancelledAt?: string | null;
+  reassignedVehicleId?: string | null;
+  reassignedReason?: string | null;
+  reassignedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   vehicle: Vehicle;
+  reassignedVehicle?: Vehicle | null;
   flat?: {
     id: string;
     number: string;

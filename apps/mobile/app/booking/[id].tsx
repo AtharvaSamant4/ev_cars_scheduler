@@ -108,6 +108,9 @@ export default function BookingDetailsScreen() {
           label="Duration"
           value={hoursLabel(booking.data.durationMinutes)}
         />
+        {booking.data.status === "BOOKED" && booking.data.otp && (
+          <Detail label="OTP (Provide to Driver)" value={booking.data.otp} />
+        )}
         <Detail label="Booking ID" value={booking.data.id} />
       </Card>
 

@@ -12,7 +12,7 @@ import type { AuthUser } from "@/src/lib/auth";
 import { AppError } from "@/src/lib/errors";
 import { paginated, pagination } from "@/src/lib/pagination";
 import { bookingResponse } from "@/src/modules/bookings/service";
-import { currentQuotaYear } from "@/src/modules/residents/service";
+import { currentQuotaYear, currentQuotaWeek } from "@/src/modules/residents/service";
 
 export async function adminDashboard(user: AuthUser) {
   const now = new Date();
@@ -91,6 +91,7 @@ export async function createVehicle(
     name: string;
     registrationNumber: string;
     status?: VehicleStatus;
+    isReserve?: boolean;
   },
 ) {
   return prisma.vehicle.create({
@@ -99,6 +100,7 @@ export async function createVehicle(
       name: input.name,
       registrationNumber: input.registrationNumber.toUpperCase(),
       status: input.status,
+      isReserve: input.isReserve,
     },
   });
 }
@@ -122,6 +124,7 @@ export async function updateVehicle(
     name?: string;
     registrationNumber?: string;
     status?: VehicleStatus;
+    isReserve?: boolean;
   },
 ) {
   await getVehicle(user, id);
@@ -145,6 +148,7 @@ export async function listFlats(
   isActive?: boolean,
 ) {
   const year = await currentQuotaYear(user.societyId);
+  const week = await currentQuotaWeek(user.societyId);
   const where: Prisma.FlatWhereInput = {
     societyId: user.societyId,
     isActive,
@@ -162,7 +166,7 @@ export async function listFlats(
           },
         },
         quotas: {
-          where: { year },
+          where: { year, weekNumber: week },
         },
       },
       orderBy: { number: "asc" },
@@ -180,9 +184,11 @@ export async function createFlat(
     number: string;
     allocatedMinutes: number;
     year?: number;
+    weekNumber?: number;
   },
 ) {
   const year = input.year ?? (await currentQuotaYear(user.societyId));
+  const weekNumber = input.weekNumber ?? (await currentQuotaWeek(user.societyId));
 
   return prisma.$transaction(async (tx) => {
     const flat = await tx.flat.create({
@@ -195,6 +201,7 @@ export async function createFlat(
       data: {
         flatId: flat.id,
         year,
+        weekNumber,
         allocatedMinutes: input.allocatedMinutes,
       },
     });
@@ -263,6 +270,7 @@ export async function updateQuota(
   user: AuthUser,
   flatId: string,
   year: number,
+  weekNumber: number,
   allocatedMinutes: number,
 ) {
   const flat = await prisma.flat.findFirst({
@@ -275,7 +283,7 @@ export async function updateQuota(
   }
 
   const existing = await prisma.flatQuota.findUnique({
-    where: { flatId_year: { flatId, year } },
+    where: { flatId_year_weekNumber: { flatId, year, weekNumber } },
   });
 
   if (existing && allocatedMinutes < existing.usedMinutes) {
@@ -287,11 +295,12 @@ export async function updateQuota(
   }
 
   return prisma.flatQuota.upsert({
-    where: { flatId_year: { flatId, year } },
+    where: { flatId_year_weekNumber: { flatId, year, weekNumber } },
     update: { allocatedMinutes },
     create: {
       flatId,
       year,
+      weekNumber,
       allocatedMinutes,
     },
   });
@@ -515,6 +524,7 @@ export async function getAdminBooking(user: AuthUser, id: string) {
     where: { id, societyId: user.societyId },
     include: {
       vehicle: true,
+      reassignedVehicle: true,
       flat: { select: { id: true, number: true } },
       user: { select: { id: true, name: true, phone: true } },
     },
@@ -525,4 +535,140 @@ export async function getAdminBooking(user: AuthUser, id: string) {
   }
 
   return bookingResponse(booking);
+}
+
+export async function listDrivers(
+  user: AuthUser,
+  page: number,
+  pageSize: number,
+) {
+  const where = { societyId: user.societyId, role: UserRole.DRIVER };
+  const [items, total] = await prisma.$transaction([
+    prisma.user.findMany({
+      where,
+      include: {
+        driver: {
+          include: {
+            vehicle: true,
+          },
+        },
+      },
+      orderBy: { name: "asc" },
+      ...pagination(page, pageSize),
+    }),
+    prisma.user.count({ where }),
+  ]);
+
+  return paginated(items, total, page, pageSize);
+}
+
+export async function createDriver(
+  user: AuthUser,
+  input: {
+    name: string;
+    phone: string;
+    password?: string;
+  },
+) {
+  const phone = input.phone.trim();
+  const existing = await prisma.user.findUnique({
+    where: { phone },
+  });
+
+  if (existing) {
+    throw new AppError(409, "CONFLICT", "Phone number already exists");
+  }
+
+  const passwordHash = await hash(input.password || "Driver@123", 10);
+
+  return prisma.$transaction(async (tx) => {
+    const newUser = await tx.user.create({
+      data: {
+        societyId: user.societyId,
+        role: UserRole.DRIVER,
+        name: input.name.trim(),
+        phone,
+        passwordHash,
+      },
+    });
+
+    const driver = await tx.driver.create({
+      data: {
+        userId: newUser.id,
+      },
+    });
+
+    return { ...newUser, driver };
+  });
+}
+
+export async function updateDriver(
+  user: AuthUser,
+  id: string,
+  input: {
+    name?: string;
+    phone?: string;
+    password?: string;
+  },
+) {
+  const existing = await prisma.user.findFirst({
+    where: { id, societyId: user.societyId, role: UserRole.DRIVER },
+  });
+
+  if (!existing) {
+    throw new AppError(404, "NOT_FOUND", "Driver not found");
+  }
+
+  const data: Prisma.UserUpdateInput = {};
+
+  if (input.name) {
+    data.name = input.name.trim();
+  }
+
+  if (input.phone) {
+    const phone = input.phone.trim();
+    const phoneUser = await prisma.user.findUnique({ where: { phone } });
+    if (phoneUser && phoneUser.id !== id) {
+      throw new AppError(409, "CONFLICT", "Phone number already exists");
+    }
+    data.phone = phone;
+  }
+
+  if (input.password) {
+    data.passwordHash = await hash(input.password, 10);
+  }
+
+  return prisma.user.update({
+    where: { id },
+    data,
+  });
+}
+
+export async function assignDriverVehicle(
+  user: AuthUser,
+  userId: string,
+  vehicleId: string | null,
+) {
+  const existing = await prisma.user.findFirst({
+    where: { id: userId, societyId: user.societyId, role: UserRole.DRIVER },
+    include: { driver: true },
+  });
+
+  if (!existing || !existing.driver) {
+    throw new AppError(404, "NOT_FOUND", "Driver not found");
+  }
+
+  if (vehicleId) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, societyId: user.societyId },
+    });
+    if (!vehicle) {
+      throw new AppError(404, "NOT_FOUND", "Vehicle not found");
+    }
+  }
+
+  return prisma.driver.update({
+    where: { id: existing.driver.id },
+    data: { vehicleId },
+  });
 }

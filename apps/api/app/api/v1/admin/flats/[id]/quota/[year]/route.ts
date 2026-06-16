@@ -9,6 +9,7 @@ import {
   routeId,
 } from "@/src/lib/http";
 import { updateQuota } from "@/src/modules/admin/service";
+import { currentQuotaWeek } from "@/src/modules/residents/service";
 import { AppError } from "@/src/lib/errors";
 
 export const runtime = "nodejs";
@@ -24,5 +25,6 @@ export const PUT = apiRoute(async (request, context) => {
   }
 
   const input = await parseBody(request, quotaUpdateSchema);
-  return ok(await updateQuota(user, flatId, year, input.allocatedMinutes));
+  const weekNumber = await currentQuotaWeek(user.societyId);
+  return ok(await updateQuota(user, flatId, year, weekNumber, input.allocatedMinutes));
 });

@@ -2,7 +2,7 @@ import { UserRole } from "@society-ev/db";
 
 import { requireAuth } from "@/src/lib/auth";
 import { apiRoute, ok } from "@/src/lib/http";
-import { getCurrentQuota } from "@/src/modules/bookings/service";
+import { getCurrentQuota } from "@/src/modules/residents/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

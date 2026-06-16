@@ -1,10 +1,10 @@
-export type BookingStatus = "BOOKED" | "COMPLETED" | "CANCELLED";
+export type BookingStatus = "BOOKED" | "ACTIVE" | "COMPLETED" | "CANCELLED";
 
 export type ResidentUser = {
   id: string;
   name: string;
-  role: "RESIDENT";
-  flat: {
+  role: "RESIDENT" | "DRIVER";
+  flat?: {
     id: string;
     number: string;
   };
@@ -42,6 +42,8 @@ export type Booking = {
   durationMinutes: number;
   status: BookingStatus;
   effectiveStatus: BookingStatus;
+  otp?: string | null;
+  startedAt?: string | null;
   cancelledAt: string | null;
   vehicle: VehicleSummary;
 };
