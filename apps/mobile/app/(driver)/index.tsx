@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import { RefreshControl, StyleSheet, Text, View } from "react-native";
 
-import { useDriverDashboard, useVerifyOtp, useCompleteTrip, useReportIssue } from "@/src/api/hooks";
+import { useDriverDashboard, useVerifyOtp, useDriverArrive, useCompleteTrip, useReportIssue } from "@/src/api/hooks";
 import { Button } from "@/src/components/button";
 import { Card } from "@/src/components/card";
 import { Screen } from "@/src/components/screen";
@@ -138,8 +138,18 @@ export default function DriverDashboardScreen() {
 
 function TripCard({ trip }: { trip: any }) {
   const [otp, setOtp] = useState("");
+  const arriveMutation = useDriverArrive(trip.id);
   const verifyMutation = useVerifyOtp(trip.id);
   const completeMutation = useCompleteTrip(trip.id);
+
+  const handleArrive = async () => {
+    try {
+      await arriveMutation.mutateAsync();
+      notify("Arrived", "OTP generated for resident.");
+    } catch (error) {
+      notify("Action Failed", errorMessage(error));
+    }
+  };
 
   const handleVerify = async () => {
     try {
@@ -172,7 +182,7 @@ function TripCard({ trip }: { trip: any }) {
         </View>
       </View>
 
-      {trip.status === "ACTIVE" && (
+      {(trip.status === "IN_PROGRESS" || trip.status === "ACTIVE") && (
         <View style={styles.otpSection}>
           <View style={styles.activeBadge}>
             <Text style={styles.activeText}>Trip In Progress</Text>
@@ -194,7 +204,7 @@ function TripCard({ trip }: { trip: any }) {
         </View>
       )}
 
-      {trip.status === "BOOKED" && (
+      {trip.status === "OTP_PENDING" && (
         <View style={styles.otpSection}>
           <TextField
             label="Verification OTP"
@@ -209,6 +219,18 @@ function TripCard({ trip }: { trip: any }) {
             loading={verifyMutation.isPending}
             disabled={otp.length !== 6 || verifyMutation.isPending}
             onPress={handleVerify}
+          />
+        </View>
+      )}
+
+      {(trip.status === "DRIVER_ASSIGNED" || trip.status === "BOOKED") && (
+        <View style={styles.otpSection}>
+          <Button
+            label="I Have Arrived"
+            variant="secondary"
+            loading={arriveMutation.isPending}
+            disabled={arriveMutation.isPending}
+            onPress={handleArrive}
           />
         </View>
       )}

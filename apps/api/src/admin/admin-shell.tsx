@@ -17,6 +17,10 @@ const navItems = [
   ["vehicle-status", "Vehicle Status"],
   ["drivers", "Drivers"],
   ["wallets", "Wallets"],
+  ["society-qr", "Society QR"],
+  ["recharge-requests", "Recharge Requests"],
+  ["cancellation-settings", "Cancellation Settings"],
+  ["affected-bookings", "Affected Bookings"],
 ] as const;
 
 export function AdminShell({ children }: { children: ReactNode }) {
@@ -131,7 +135,7 @@ export function StatusPill({ value }: { value: string }) {
   const className =
     value === "MAINTENANCE" || value === "BOOKED"
       ? "pill warning"
-      : value === "INACTIVE" || value === "CANCELLED"
+      : value === "INACTIVE" || value === "CANCELLED" || value === "BREAKDOWN" || value === "AT_RISK"
         ? "pill danger"
         : "pill";
 

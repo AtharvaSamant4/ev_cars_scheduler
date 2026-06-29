@@ -141,3 +141,98 @@ export async function adjustWalletBalance(
     return updatedWallet;
   });
 }
+
+export async function createRechargeRequest(user: AuthUser, amount: number, notes?: string) {
+  if (user.role !== "RESIDENT") {
+    throw new AppError(403, "FORBIDDEN", "Only residents can request recharge");
+  }
+
+  if (amount <= 0) {
+    throw new AppError(400, "INVALID_AMOUNT", "Recharge amount must be strictly positive");
+  }
+
+  const request = await prisma.rechargeRequest.create({
+    data: {
+      userId: user.id,
+      amount,
+      notes,
+    },
+  });
+
+  return request;
+}
+
+export async function getResidentRechargeRequests(user: AuthUser) {
+  return await prisma.rechargeRequest.findMany({
+    where: { userId: user.id },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function mockRechargeWallet(user: AuthUser, amount: number) {
+  if (user.role !== "RESIDENT") {
+    throw new AppError(403, "FORBIDDEN", "Only residents can perform mock recharges");
+  }
+
+  if (amount <= 0 || amount > 10000) {
+    throw new AppError(400, "INVALID_AMOUNT", "Recharge amount must be strictly between 1 and 10000");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    // 1. Create auto-approved request for history
+    await tx.rechargeRequest.create({
+      data: {
+        userId: user.id,
+        amount,
+        status: "APPROVED",
+        notes: "Mock Payment via QR",
+        approvedAt: new Date(),
+        // mock system approval by not setting approvedBy
+      },
+    });
+
+    // 2. Load or create wallet
+    let wallet = await tx.wallet.findUnique({
+      where: { userId: user.id },
+    });
+
+    if (!wallet) {
+      wallet = await tx.wallet.create({
+        data: {
+          userId: user.id,
+          balance: 5000,
+          transactions: {
+            create: {
+              amount: 5000,
+              type: "CREDIT",
+              description: "Initial Promotional Balance",
+            },
+          },
+        },
+      });
+    }
+
+    // 3. Credit wallet and log transaction
+    const updatedWallet = await tx.wallet.update({
+      where: { id: wallet.id },
+      data: {
+        balance: wallet.balance + amount,
+        transactions: {
+          create: {
+            amount,
+            type: "RECHARGE",
+            description: "Wallet Recharge (Demo)",
+          },
+        },
+      },
+      include: {
+        transactions: {
+          orderBy: { createdAt: "desc" },
+          take: 1
+        }
+      }
+    });
+
+    return updatedWallet;
+  });
+}

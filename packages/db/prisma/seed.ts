@@ -123,7 +123,7 @@ async function main() {
         },
       });
 
-      await prisma.user.upsert({
+      const residentUser = await prisma.user.upsert({
         where: { flatId: flat.id },
         update: {
           societyId: society.id,
@@ -140,6 +140,22 @@ async function main() {
           name: `Resident ${number}`,
           phone: `900000${(index + 1).toString().padStart(4, "0")}`,
           passwordHash: residentPasswordHash,
+        },
+      });
+
+      await prisma.wallet.upsert({
+        where: { userId: residentUser.id },
+        update: { balance: 1000 },
+        create: {
+          userId: residentUser.id,
+          balance: 1000,
+          transactions: {
+            create: {
+              amount: 1000,
+              type: "CREDIT",
+              description: "Initial Promotional Balance",
+            },
+          },
         },
       });
 
@@ -166,16 +182,16 @@ async function main() {
     });
 
     const vehicleDefinitions = [
-      ["EV 1", "MH-01-EV-1001"],
-      ["EV 2", "MH-01-EV-1002"],
-      ["EV 3", "MH-01-EV-1003"],
-      ["EV 4", "MH-01-EV-1004"],
-      ["EV 5", "MH-01-EV-1005"],
+      ["EV 1", "MH-01-EV-1000", 100],
+      ["EV 2", "MH-01-EV-1001", 150],
+      ["EV 3", "MH-01-EV-1002", 100],
+      ["EV 4", "MH-01-EV-1003", 150],
+      ["EV 5", "MH-01-EV-1004", 100],
     ] as const;
 
     const vehicles = [];
 
-    for (const [name, registrationNumber] of vehicleDefinitions) {
+    for (const [name, registrationNumber, hourlyRate] of vehicleDefinitions) {
       const vehicle = await prisma.vehicle.upsert({
         where: {
           societyId_registrationNumber: {
@@ -185,12 +201,14 @@ async function main() {
         },
         update: {
           name,
+          hourlyRate,
           status: VehicleStatus.AVAILABLE,
         },
         create: {
           societyId: society.id,
           name,
           registrationNumber,
+          hourlyRate,
         },
       });
 
@@ -221,13 +239,21 @@ async function main() {
       });
 
       const driverProfile = await prisma.driver.upsert({
-        where: { userId: driverUser.id },
+        where: { phoneNumber: driverPhone },
         update: {
-          vehicleId: vehicles[i].id,
+          societyId: society.id,
+          fullName: `Driver ${i + 1}`,
+          licenseNumber: `DL-MH-${1000 + i}`,
+          isActive: true,
+          vehicleId: vehicles[i]?.id,
         },
         create: {
-          userId: driverUser.id,
-          vehicleId: vehicles[i].id,
+          societyId: society.id,
+          fullName: `Driver ${i + 1}`,
+          phoneNumber: driverPhone,
+          licenseNumber: `DL-MH-${1000 + i}`,
+          isActive: true,
+          vehicleId: vehicles[i]?.id,
         },
       });
 

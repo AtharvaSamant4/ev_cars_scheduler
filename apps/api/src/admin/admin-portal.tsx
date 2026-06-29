@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import QRCode from "react-qr-code";
 
 import { adminApi, errorMessage, qs } from "./api";
 import { AdminShell, PageHeader, StatusPill } from "./admin-shell";
@@ -71,11 +72,44 @@ export function AdminPortal({ section }: { section: string }) {
       <DriversScreen />
     ) : section === "wallets" ? (
       <WalletsScreen />
+    ) : section === "society-qr" ? (
+      <SocietyQRScreen />
+    ) : section === "recharge-requests" ? (
+      <RechargeRequestsScreen />
+    ) : section === "cancellation-settings" ? (
+      <CancellationSettingsScreen />
+    ) : section === "affected-bookings" ? (
+      <AffectedBookingsScreen />
     ) : (
       <DashboardScreen />
     );
 
   return <AdminShell>{content}</AdminShell>;
+}
+
+function SocietyQRScreen() {
+  const qrUrl = typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname}:3000/demo-payment`
+    : "http://localhost:3000/demo-payment";
+
+  return (
+    <>
+      <PageHeader
+        title="Society QR"
+        subtitle="Print or display this QR code for residents to scan."
+      />
+      <div className="grid two-col">
+        <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "4rem" }}>
+          <QRCode value={qrUrl} size={256} />
+          
+          <h2 style={{ marginTop: "2rem" }}>Scan to Recharge Wallet</h2>
+          <p className="text-muted text-center" style={{ marginTop: "0.5rem" }}>
+            Scan with any native phone camera to open the Mock Payment Gateway.
+          </p>
+        </div>
+      </div>
+    </>
+  );
 }
 
 function DashboardScreen() {
@@ -269,6 +303,8 @@ function VehicleForm({
   const [registrationNumber, setRegistrationNumber] = useState("");
   const [isReserve, setIsReserve] = useState("false");
   const [status, setStatus] = useState<VehicleStatus>("AVAILABLE");
+  const [maintenanceReason, setMaintenanceReason] = useState("");
+  const [expectedReturnDate, setExpectedReturnDate] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -278,6 +314,12 @@ function VehicleForm({
       setRegistrationNumber(editing?.registrationNumber ?? "");
       setIsReserve(editing?.isReserve ? "true" : "false");
       setStatus(editing?.status ?? "AVAILABLE");
+      setMaintenanceReason((editing as any)?.maintenanceReason ?? "");
+      setExpectedReturnDate(
+        (editing as any)?.expectedReturnDate
+          ? new Date((editing as any).expectedReturnDate).toISOString().split("T")[0]
+          : ""
+      );
     });
   }, [editing]);
 
@@ -287,9 +329,17 @@ function VehicleForm({
     setMessage(null);
 
     try {
+      const isMaintenance = status === "MAINTENANCE" || status === "BREAKDOWN";
       await adminApi(editing ? `/admin/vehicles/${editing.id}` : "/admin/vehicles", {
         method: editing ? "PATCH" : "POST",
-        body: JSON.stringify({ name, registrationNumber, status, isReserve: isReserve === "true" }),
+        body: JSON.stringify({ 
+          name, 
+          registrationNumber, 
+          status, 
+          isReserve: isReserve === "true",
+          maintenanceReason: isMaintenance ? maintenanceReason : undefined,
+          expectedReturnDate: isMaintenance && expectedReturnDate ? new Date(expectedReturnDate).toISOString() : undefined
+        }),
       });
       setMessage(editing ? "Vehicle updated." : "Vehicle created.");
       onSaved();
@@ -320,9 +370,24 @@ function VehicleForm({
       <SelectField
         label="Status"
         value={status}
-        options={["AVAILABLE", "MAINTENANCE", "INACTIVE"]}
+        options={["AVAILABLE", "MAINTENANCE", "BREAKDOWN", "INACTIVE"]}
         onChange={(value) => setStatus(value as VehicleStatus)}
       />
+      {(status === "MAINTENANCE" || status === "BREAKDOWN") && (
+        <>
+          <TextField
+            label="Reason (Optional)"
+            value={maintenanceReason}
+            onChange={setMaintenanceReason}
+          />
+          <TextField
+            label="Expected Return Date (Optional)"
+            type="date"
+            value={expectedReturnDate}
+            onChange={setExpectedReturnDate}
+          />
+        </>
+      )}
       <Message error={error} success={message} />
       <div className="actions">
         <button className="button" type="submit">
@@ -942,6 +1007,11 @@ function VehicleStatusScreen() {
                   <div>
                     <strong>{vehicle.name}</strong>
                     <span className="muted">{vehicle.registrationNumber}</span>
+                    {vehicle.isReserve ? (
+                      <span className="badge warning" style={{ marginLeft: "8px" }}>RESERVE</span>
+                    ) : (
+                      <span className="badge" style={{ marginLeft: "8px" }}>NORMAL</span>
+                    )}
                   </div>
                   <StatusPill value={status} />
                 </div>
@@ -1010,22 +1080,21 @@ function SelectField({
 }
 
 function DriversScreen() {
-  const [page, setPage] = useState(1);
-  const [pageSize] = useState(25);
   const drivers = useAdminData(
-    () => adminApi<Paginated<any>>(`/admin/drivers?page=${page}&pageSize=${pageSize}`),
-    [page, pageSize],
-  );
-  const vehicles = useAdminData(
-    () => adminApi<Paginated<Vehicle>>(`/admin/vehicles?pageSize=100`),
+    () => adminApi<any[]>("/admin/drivers?includeInactive=true"),
     [],
   );
+  const vehicles = useAdminData(
+    () => adminApi<any>("/admin/vehicles?pageSize=100"),
+    [],
+  );
+  const [editing, setEditing] = useState<any | null>(null);
 
   return (
     <>
       <PageHeader
-        title="Drivers"
-        subtitle="Manage drivers and assign them to vehicles."
+        title="Driver Management"
+        subtitle="Manage society drivers and their statuses independently of user accounts."
       />
 
       <div className="grid two-col">
@@ -1037,36 +1106,34 @@ function DriversScreen() {
                   <tr>
                     <th>Name</th>
                     <th>Phone</th>
+                    <th>License Number</th>
+                    <th>Status</th>
                     <th>Assigned Vehicle</th>
+                    <th>Upcoming Bookings</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.items.map((item: any) => (
-                    <tr key={item.id}>
-                      <td>{item.name}</td>
-                      <td>{item.phone}</td>
-                      <td>{item.driver?.vehicle?.registrationNumber || "None"}</td>
+                  {data.map((driver: any) => (
+                    <tr key={driver.id}>
                       <td>
-                        <select
-                          className="input"
-                          style={{ maxWidth: 160, margin: 0, height: 32, fontSize: 13 }}
-                          value={item.driver?.vehicleId || ""}
-                          onChange={(e) => {
-                            const vehicleId = e.target.value || null;
-                            adminApi(`/admin/drivers/${item.id}/vehicle`, {
-                              method: "PUT",
-                              body: JSON.stringify({ vehicleId }),
-                            }).then(() => drivers.reload());
-                          }}
+                        <strong>{driver.fullName}</strong>
+                        {driver.email ? <div className="muted">{driver.email}</div> : null}
+                      </td>
+                      <td>{driver.phoneNumber}</td>
+                      <td>{driver.licenseNumber}</td>
+                      <td>
+                        <StatusPill value={driver.isActive ? "ACTIVE" : "INACTIVE"} />
+                      </td>
+                      <td>{driver.vehicle ? `${driver.vehicle.name} (${driver.vehicle.registrationNumber})` : <span className="muted">None</span>}</td>
+                      <td>{driver.upcomingTripsCount}</td>
+                      <td>
+                        <button
+                          className="button secondary"
+                          onClick={() => setEditing(driver)}
                         >
-                          <option value="">Unassigned</option>
-                          {vehicles.data?.items.map((v: Vehicle) => (
-                            <option key={v.id} value={v.id}>
-                              {v.registrationNumber} ({v.name})
-                            </option>
-                          ))}
-                        </select>
+                          Edit
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -1075,17 +1142,50 @@ function DriversScreen() {
             </div>
           )}
         </DataCard>
-        <DriverForm onSaved={() => drivers.reload()} />
+        <DriverForm
+          editing={editing}
+          vehicles={vehicles.data?.items || []}
+          onCancel={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            void drivers.reload();
+          }}
+        />
       </div>
     </>
   );
 }
 
-function DriverForm({ onSaved }: { onSaved: () => void }) {
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+function DriverForm({
+  editing,
+  vehicles,
+  onCancel,
+  onSaved,
+}: {
+  editing: any | null;
+  vehicles: any[];
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [fullName, setFullName] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [email, setEmail] = useState("");
+  const [licenseNumber, setLicenseNumber] = useState("");
+  const [isActive, setIsActive] = useState("true");
+  const [vehicleId, setVehicleId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setFullName(editing?.fullName ?? "");
+      setPhoneNumber(editing?.phoneNumber ?? "");
+      setEmail(editing?.email ?? "");
+      setLicenseNumber(editing?.licenseNumber ?? "");
+      setIsActive(editing ? String(editing.isActive) : "true");
+      setVehicleId(editing?.vehicleId ?? "");
+    });
+  }, [editing]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1093,13 +1193,32 @@ function DriverForm({ onSaved }: { onSaved: () => void }) {
     setMessage(null);
 
     try {
-      await adminApi("/admin/drivers", {
-        method: "POST",
-        body: JSON.stringify({ name, phone, password: "Driver@123" }),
-      });
-      setMessage("Driver created successfully.");
-      setName("");
-      setPhone("");
+      if (editing) {
+        await adminApi(`/admin/drivers/${editing.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fullName,
+            phoneNumber,
+            email: email || undefined,
+            licenseNumber,
+            isActive: isActive === "true",
+            vehicleId: vehicleId || undefined,
+          }),
+        });
+      } else {
+        await adminApi("/admin/drivers", {
+          method: "POST",
+          body: JSON.stringify({
+            fullName,
+            phoneNumber,
+            email: email || undefined,
+            licenseNumber,
+            isActive: isActive === "true",
+            vehicleId: vehicleId || undefined,
+          }),
+        });
+      }
+      setMessage(editing ? "Driver updated successfully." : "Driver created successfully.");
       onSaved();
     } catch (currentError) {
       setError(errorMessage(currentError));
@@ -1108,17 +1227,37 @@ function DriverForm({ onSaved }: { onSaved: () => void }) {
 
   return (
     <form className="card form-card" onSubmit={submit}>
-      <h2 className="panel-title">Add Driver</h2>
-      <TextField label="Driver Name" value={name} onChange={setName} />
-      <TextField label="Phone Number" value={phone} onChange={setPhone} />
-      <div className="muted" style={{ fontSize: 13, marginBottom: 16 }}>
-        Default password is set to <strong>Driver@123</strong>.
-      </div>
+      <h2 className="panel-title">{editing ? "Edit Driver" : "Add Driver"}</h2>
+      <TextField label="Full Name" value={fullName} onChange={setFullName} />
+      <TextField label="Phone Number" value={phoneNumber} onChange={setPhoneNumber} />
+      <TextField label="Email (Optional)" value={email} onChange={setEmail} />
+      <TextField label="License Number" value={licenseNumber} onChange={setLicenseNumber} />
+      {editing ? (
+        <SelectField
+          label="Status"
+          value={isActive}
+          options={["true", "false"]}
+          labels={{ true: "Active", false: "Inactive" }}
+          onChange={setIsActive}
+        />
+      ) : null}
+      <SelectField
+        label="Assigned Vehicle"
+        value={vehicleId}
+        options={["", ...vehicles.map((v) => v.id)]}
+        labels={{ "": "None", ...Object.fromEntries(vehicles.map((v) => [v.id, `${v.name} (${v.registrationNumber})`])) }}
+        onChange={setVehicleId}
+      />
       <Message error={error} success={message} />
       <div className="actions">
         <button className="button" type="submit">
-          Create Driver
+          {editing ? "Save Driver" : "Create Driver"}
         </button>
+        {editing ? (
+          <button className="button secondary" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        ) : null}
       </div>
     </form>
   );
@@ -1275,3 +1414,235 @@ function WalletAdjustForm({
   );
 }
 
+function CancellationSettingsScreen() {
+  const penaltyData = useAdminData(
+    () => adminApi<{ amount: number }>("/admin/cancellation-penalty"),
+    []
+  );
+  
+  const [amountStr, setAmountStr] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (penaltyData.data) {
+      setAmountStr(String(penaltyData.data.amount));
+    }
+  }, [penaltyData.data]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+    setSaving(true);
+
+    const amount = parseInt(amountStr, 10);
+    if (isNaN(amount) || amount < 0) {
+      setError("Please enter a valid positive amount.");
+      setSaving(false);
+      return;
+    }
+
+    try {
+      await adminApi("/admin/cancellation-penalty", {
+        method: "POST",
+        body: JSON.stringify({ amount }),
+      });
+      setMessage("Cancellation settings updated successfully.");
+      await penaltyData.reload();
+    } catch (currentError) {
+      setError(errorMessage(currentError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Cancellation Settings"
+        subtitle="Configure the fixed penalty amount deducted when a resident cancels a booking."
+      />
+      
+      <div className="grid two-col">
+        <form className="card form-card" onSubmit={submit}>
+          <TextField
+            label="Cancellation Penalty Amount (₹)"
+            type="number"
+            value={amountStr}
+            onChange={setAmountStr}
+          />
+          <Message error={error} success={message} />
+          <div className="actions">
+            <button className="button" type="submit" disabled={saving || penaltyData.loading}>
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+}
+
+function AffectedBookingsScreen() {
+  const affectedBookings = useAdminData(
+    () => adminApi<any>("/admin/bookings/affected"),
+    [],
+  );
+
+  return (
+    <>
+      <PageHeader
+        title="Affected Bookings"
+        subtitle="Manage bookings impacted by vehicle maintenance and breakdowns."
+      />
+      <DataCard state={affectedBookings}>
+        {(data) => (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Vehicle</th>
+                  <th>Start Time</th>
+                  <th>End Time</th>
+                  <th>Resident</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((booking: any) => (
+                  <tr key={booking.id}>
+                    <td>{booking.vehicle.name}</td>
+                    <td>{dateTime(booking.startTime)}</td>
+                    <td>{dateTime(booking.endTime)}</td>
+                    <td>{booking.user.name}</td>
+                    <td>
+                      <StatusPill value={booking.status} />
+                    </td>
+                    <td>
+                      <Link className="button secondary" href={`/admin/bookings/${booking.id}`}>
+                        Open & Reassign
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+                {data.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: "center", padding: "32px 0" }}>
+                      No affected bookings currently require reassignment.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </DataCard>
+    </>
+  );
+}
+
+function RechargeRequestsScreen() {
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const requests = useAdminData(
+    () => adminApi<any>(`/admin/recharge-requests?status=${statusFilter}`),
+    [statusFilter],
+  );
+
+  async function processRequest(id: string, action: "APPROVE" | "REJECT") {
+    if (!confirm(`Are you sure you want to ${action} this request?`)) return;
+    try {
+      await adminApi(`/admin/recharge-requests/${id}/process`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      void requests.reload();
+    } catch (err) {
+      alert(errorMessage(err));
+    }
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Recharge Requests"
+        subtitle="Review and process resident wallet top-up requests."
+        action={
+          <div style={{ display: "flex", gap: 12 }}>
+            <SelectField
+              label=""
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={["ALL", "PENDING", "APPROVED", "REJECTED"]}
+            />
+          </div>
+        }
+      />
+
+      <DataCard state={requests}>
+        {(data) => (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Resident</th>
+                  <th>Amount</th>
+                  <th>Notes</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((req: any) => (
+                  <tr key={req.id}>
+                    <td>{new Date(req.createdAt).toLocaleString()}</td>
+                    <td>
+                      {req.user.name} ({req.user.flat?.number})
+                    </td>
+                    <td>₹{req.amount}</td>
+                    <td>{req.notes || "-"}</td>
+                    <td>
+                      <StatusPill value={req.status} />
+                    </td>
+                    <td>
+                      {req.status === "PENDING" ? (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            className="button"
+                            onClick={() => processRequest(req.id, "APPROVE")}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            className="button secondary"
+                            onClick={() => processRequest(req.id, "REJECT")}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
+                          {req.status === "APPROVED" ? `Approved by ${req.approvedUser?.name || "Admin"}` : "Rejected"}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {data.items.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: "center", padding: "32px 0" }}>
+                      No requests found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </DataCard>
+    </>
+  );
+}

@@ -45,6 +45,9 @@ function requestToken(request: NextRequest) {
     return authorization.slice("Bearer ".length);
   }
 
+  const queryToken = request.nextUrl?.searchParams?.get("token");
+  if (queryToken) return queryToken;
+
   return request.cookies.get(COOKIE_NAME)?.value;
 }
 

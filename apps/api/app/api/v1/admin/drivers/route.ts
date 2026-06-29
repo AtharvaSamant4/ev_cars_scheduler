@@ -14,15 +14,16 @@ import {
 import {
   createDriver,
   listDrivers,
-} from "@/src/modules/admin/service";
+} from "@/src/modules/drivers/service";
 
 export const runtime = "nodejs";
 
 export const GET = apiRoute(async (request) => {
   const user = await requireAuth(request, UserRole.ADMIN);
-  const query = await parseQuery(request, adminEntityListQuerySchema);
+  const { searchParams } = new URL(request.url);
+  const includeInactive = searchParams.get("includeInactive") === "true";
 
-  return ok(await listDrivers(user, query.page, query.pageSize));
+  return ok(await listDrivers(user, includeInactive));
 });
 
 export const POST = apiRoute(async (request) => {

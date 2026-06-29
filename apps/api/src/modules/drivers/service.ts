@@ -1,29 +1,112 @@
-import { prisma, UserRole, BookingStatus } from "@society-ev/db";
-
+import { prisma, BookingStatus } from "@society-ev/db";
 import type { AuthUser } from "@/src/lib/auth";
 import { AppError } from "@/src/lib/errors";
 
-function assertDriver(user: AuthUser) {
-  if (user.role !== UserRole.DRIVER) {
-    throw new AppError(403, "FORBIDDEN", "Only drivers can access this endpoint");
+export async function listDrivers(user: AuthUser, includeInactive = false) {
+  if (user.role !== "ADMIN") {
+    throw new AppError(403, "FORBIDDEN", "Only admins can view drivers");
   }
-}
 
-export async function driverDashboard(user: AuthUser) {
-  assertDriver(user);
+  const where: any = { societyId: user.societyId };
+  if (!includeInactive) {
+    where.isActive = true;
+  }
 
-  const driver = await prisma.driver.findUnique({
-    where: { userId: user.id },
-    include: { vehicle: true },
+  const drivers = await prisma.driver.findMany({
+    where,
+    orderBy: { fullName: "asc" },
+    include: {
+      vehicle: true,
+    }
   });
 
-  if (!driver) {
+  const now = new Date();
+  const activeVehicleIds = drivers.map(d => d.vehicleId).filter(Boolean) as string[];
+
+  const upcomingCounts = await prisma.booking.groupBy({
+    by: ["vehicleId"],
+    where: {
+      vehicleId: { in: activeVehicleIds },
+      status: { in: [BookingStatus.BOOKED, BookingStatus.ACTIVE] },
+      startTime: { gt: now },
+    },
+    _count: true,
+  });
+
+  const countsMap = new Map(upcomingCounts.map(c => [c.vehicleId, c._count]));
+
+  return drivers.map(driver => ({
+    ...driver,
+    upcomingTripsCount: driver.vehicleId ? (countsMap.get(driver.vehicleId) || 0) : 0,
+  }));
+}
+
+export async function createDriver(
+  user: AuthUser,
+  data: { fullName: string; phoneNumber: string; email?: string; licenseNumber: string; isActive?: boolean; vehicleId?: string }
+) {
+  if (user.role !== "ADMIN") {
+    throw new AppError(403, "FORBIDDEN", "Only admins can create drivers");
+  }
+
+  return await prisma.driver.create({
+    data: {
+      societyId: user.societyId,
+      fullName: data.fullName,
+      phoneNumber: data.phoneNumber,
+      email: data.email,
+      licenseNumber: data.licenseNumber,
+      isActive: data.isActive,
+      vehicleId: data.vehicleId || null,
+    },
+  });
+}
+
+export async function updateDriver(
+  user: AuthUser,
+  driverId: string,
+  data: { fullName?: string; phoneNumber?: string; email?: string; licenseNumber?: string; isActive?: boolean; vehicleId?: string }
+) {
+  if (user.role !== "ADMIN") {
+    throw new AppError(403, "FORBIDDEN", "Only admins can update drivers");
+  }
+
+  const driver = await prisma.driver.findUnique({ where: { id: driverId } });
+  if (!driver || driver.societyId !== user.societyId) {
+    throw new AppError(404, "NOT_FOUND", "Driver not found");
+  }
+
+  return await prisma.driver.update({
+    where: { id: driverId },
+    data: {
+      ...data,
+      vehicleId: data.vehicleId === "" ? null : data.vehicleId,
+    },
+  });
+}
+
+export async function getDriverDashboard(user: AuthUser) {
+  if (user.role !== "DRIVER") {
+    throw new AppError(403, "FORBIDDEN", "Only drivers can view driver dashboard");
+  }
+
+  const fullUser = await prisma.user.findUnique({ where: { id: user.id } });
+  if (!fullUser || !fullUser.phone) {
+    throw new AppError(404, "NOT_FOUND", "User profile not found or phone number missing");
+  }
+
+  const driverProfile = await prisma.driver.findFirst({
+    where: { phoneNumber: fullUser.phone },
+    include: {
+      vehicle: true,
+    },
+  });
+
+  if (!driverProfile) {
     throw new AppError(404, "NOT_FOUND", "Driver profile not found");
   }
 
-  const vehicle = driver.vehicle;
-
-  if (!vehicle) {
+  if (!driverProfile.vehicleId) {
     return {
       vehicle: null,
       today: [],
@@ -31,178 +114,94 @@ export async function driverDashboard(user: AuthUser) {
     };
   }
 
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
 
-  const allBookings = await prisma.booking.findMany({
-    where: {
-      vehicleId: vehicle.id,
-      status: { in: [BookingStatus.BOOKED, BookingStatus.ACTIVE] },
-      startTime: { gte: startOfToday },
-    },
-    include: {
-      flat: { select: { number: true } },
-      user: { select: { name: true, phone: true } },
-    },
-    orderBy: { startTime: "asc" },
-  });
-
-  const today = allBookings.filter((b) => b.startTime < endOfToday);
-  const upcoming = allBookings.filter((b) => b.startTime >= endOfToday);
+  const [today, upcoming] = await Promise.all([
+    prisma.booking.findMany({
+      where: {
+        societyId: user.societyId,
+        vehicleId: driverProfile.vehicleId,
+        startTime: {
+          gte: todayStart,
+          lte: todayEnd,
+        },
+        status: { notIn: [BookingStatus.CANCELLED, BookingStatus.COMPLETED] },
+      },
+      include: {
+        flat: true,
+        user: true,
+      },
+      orderBy: {
+        startTime: "asc",
+      },
+    }),
+    prisma.booking.findMany({
+      where: {
+        societyId: user.societyId,
+        vehicleId: driverProfile.vehicleId,
+        startTime: {
+          gt: todayEnd,
+        },
+        status: { notIn: [BookingStatus.CANCELLED, BookingStatus.COMPLETED] },
+      },
+      include: {
+        flat: true,
+        user: true,
+      },
+      orderBy: {
+        startTime: "asc",
+      },
+    }),
+  ]);
 
   return {
-    vehicle,
+    vehicle: driverProfile.vehicle,
     today,
     upcoming,
   };
 }
 
-export async function driverHistory(user: AuthUser) {
-  assertDriver(user);
+export async function getDriverHistory(user: AuthUser) {
+  if (user.role !== "DRIVER") {
+    throw new AppError(403, "FORBIDDEN", "Only drivers can view driver history");
+  }
 
-  const driver = await prisma.driver.findUnique({
-    where: { userId: user.id },
+  const fullUser = await prisma.user.findUnique({ where: { id: user.id } });
+  if (!fullUser || !fullUser.phone) {
+    throw new AppError(404, "NOT_FOUND", "User profile not found or phone number missing");
+  }
+
+  const driverProfile = await prisma.driver.findFirst({
+    where: { phoneNumber: fullUser.phone }
   });
 
-  if (!driver || !driver.vehicleId) {
+  if (!driverProfile) {
+    throw new AppError(404, "NOT_FOUND", "Driver profile not found");
+  }
+
+  if (!driverProfile.vehicleId) {
     return [];
   }
 
-  const history = await prisma.booking.findMany({
+  return await prisma.booking.findMany({
     where: {
-      vehicleId: driver.vehicleId,
-      status: { in: [BookingStatus.COMPLETED, BookingStatus.CANCELLED] },
+      societyId: user.societyId,
+      vehicleId: driverProfile.vehicleId,
+      OR: [
+        { startTime: { lt: new Date() } },
+        { status: { in: [BookingStatus.COMPLETED, BookingStatus.CANCELLED] } }
+      ]
     },
     include: {
-      flat: { select: { number: true } },
-      user: { select: { name: true, phone: true } },
+      flat: true,
+      user: true,
     },
-    orderBy: { startTime: "desc" },
+    orderBy: {
+      startTime: "desc",
+    },
     take: 50,
   });
-
-  return history;
-}
-
-export async function verifyBookingOtp(user: AuthUser, bookingId: string, otp: string) {
-  assertDriver(user);
-
-  const driver = await prisma.driver.findUnique({
-    where: { userId: user.id },
-  });
-
-  if (!driver?.vehicleId) {
-    throw new AppError(400, "NO_VEHICLE", "You are not assigned to a vehicle");
-  }
-
-  const booking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-  });
-
-  if (!booking) {
-    throw new AppError(404, "NOT_FOUND", "Booking not found");
-  }
-
-  if (booking.vehicleId !== driver.vehicleId) {
-    throw new AppError(403, "FORBIDDEN", "Booking belongs to another vehicle");
-  }
-
-  if (booking.status !== BookingStatus.BOOKED) {
-    throw new AppError(400, "INVALID_STATE", "Booking cannot be started");
-  }
-
-  if (booking.otpVerified) {
-    throw new AppError(400, "ALREADY_VERIFIED", "OTP already verified");
-  }
-
-  if (booking.otpAttempts >= 5) {
-    throw new AppError(403, "LOCKED", "Maximum OTP attempts exceeded");
-  }
-
-  if (new Date() > booking.endTime) {
-    throw new AppError(400, "EXPIRED", "Booking has already expired");
-  }
-
-  if (booking.otp !== otp) {
-    await prisma.booking.update({
-      where: { id: bookingId },
-      data: { otpAttempts: { increment: 1 } },
-    });
-    throw new AppError(400, "INVALID_OTP", "Invalid OTP");
-  }
-
-  await prisma.booking.update({
-    where: { id: bookingId },
-    data: {
-      otpVerified: true,
-      status: BookingStatus.ACTIVE,
-      startedAt: new Date(),
-    },
-  });
-
-  return { success: true };
-}
-
-export async function completeBooking(
-  user: AuthUser,
-  bookingId: string,
-) {
-  if (user.role !== UserRole.DRIVER) {
-    throw new AppError(403, "FORBIDDEN", "Only drivers can complete bookings");
-  }
-
-  const driver = await prisma.driver.findUnique({
-    where: { userId: user.id },
-  });
-
-  if (!driver) {
-    throw new AppError(404, "DRIVER_NOT_FOUND", "Driver profile not found");
-  }
-
-  const booking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-  });
-
-  if (!booking) {
-    throw new AppError(404, "NOT_FOUND", "Booking not found");
-  }
-
-  if (booking.vehicleId !== driver.vehicleId) {
-    throw new AppError(403, "FORBIDDEN", "Booking belongs to another vehicle");
-  }
-
-  if (booking.status !== BookingStatus.ACTIVE) {
-    throw new AppError(400, "INVALID_STATE", "Booking is not active");
-  }
-
-  await prisma.booking.update({
-    where: { id: bookingId },
-    data: {
-      status: BookingStatus.COMPLETED,
-    },
-  });
-
-  return { success: true };
-}
-
-export async function reportVehicleIssue(user: AuthUser) {
-  assertDriver(user);
-
-  const driver = await prisma.driver.findUnique({
-    where: { userId: user.id },
-  });
-
-  if (!driver || !driver.vehicleId) {
-    throw new AppError(404, "NOT_FOUND", "No assigned vehicle found");
-  }
-
-  await prisma.vehicle.update({
-    where: { id: driver.vehicleId },
-    data: {
-      status: "MAINTENANCE",
-    },
-  });
-
-  return { success: true };
 }

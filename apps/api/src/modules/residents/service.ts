@@ -57,8 +57,8 @@ export async function getDashboard(user: AuthUser) {
     prisma.booking.findMany({
       where: {
         flatId: user.flatId!,
-        status: BookingStatus.BOOKED,
-        startTime: { gt: new Date() },
+        status: { notIn: [BookingStatus.CANCELLED, BookingStatus.COMPLETED] },
+        endTime: { gt: new Date() },
       },
       include: {
         vehicle: {
@@ -138,4 +138,19 @@ export async function currentQuotaWeek(societyId: string) {
   }
 
   return getIsoWeek(new Date()).week;
+}
+
+export async function getNotifications(user: AuthUser) {
+  return prisma.notification.findMany({
+    where: { userId: user.id },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+}
+
+export async function markNotificationsRead(user: AuthUser) {
+  return prisma.notification.updateMany({
+    where: { userId: user.id, read: false },
+    data: { read: true },
+  });
 }

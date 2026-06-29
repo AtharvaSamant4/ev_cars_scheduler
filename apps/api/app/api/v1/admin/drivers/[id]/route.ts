@@ -8,11 +8,11 @@ import {
   parseBody,
   routeId,
 } from "@/src/lib/http";
-import { updateDriver } from "@/src/modules/admin/service";
+import { updateDriver } from "@/src/modules/drivers/service";
 
 export const runtime = "nodejs";
 
-export const PUT = apiRoute(async (request, context) => {
+export const PATCH = apiRoute(async (request, context) => {
   const user = await requireAuth(request, UserRole.ADMIN);
   const driverId = await routeId(context);
   const input = await parseBody(request, driverUpdateSchema);

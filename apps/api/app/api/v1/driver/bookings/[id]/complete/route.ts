@@ -1,15 +1,23 @@
-import { requireAuth } from "@/src/lib/auth";
-import { apiRoute, ok } from "@/src/lib/http";
-import { completeBooking } from "@/src/modules/drivers/service";
 import { UserRole } from "@society-ev/db";
+import { requireAuth } from "@/src/lib/auth";
+import { apiRoute, ok, routeId } from "@/src/lib/http";
+import { completeTrip } from "@/src/modules/bookings/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const POST = apiRoute(async (req, { params }) => {
-  const user = await requireAuth(req, UserRole.DRIVER);
-  const { id } = await params;
+export const POST = apiRoute(async (request, context: any) => {
+  const user = await requireAuth(request, UserRole.DRIVER);
+  const id = await routeId(context);
   
-  const booking = await completeBooking(user, id);
-  return ok({ booking });
+  let actualEndTimeValue: string | undefined;
+  try {
+    const body = await request.json();
+    actualEndTimeValue = body?.actualEndTime;
+  } catch {
+    // ignore parsing error
+  }
+
+  const result = await completeTrip(user, id, actualEndTimeValue);
+  return ok(result);
 });

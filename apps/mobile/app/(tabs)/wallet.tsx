@@ -7,7 +7,12 @@ import { EmptyState, ErrorState, LoadingState } from "@/src/components/states";
 import { errorMessage } from "@/src/lib/api";
 import { colors, radius, spacing } from "@/src/theme";
 
+import { Button } from "@/src/components/button";
+
+import { useRouter } from "expo-router";
+
 export default function WalletScreen() {
+  const router = useRouter();
   const { data, isLoading, isError, error, refetch, isRefetching } = useWallet();
 
   if (isLoading) {
@@ -42,6 +47,12 @@ export default function WalletScreen() {
             <Card style={styles.balanceCard}>
               <Text style={styles.balanceLabel}>Available Balance</Text>
               <Text style={styles.balanceAmount}>₹{data.balance}</Text>
+              <View style={{ marginTop: spacing.lg, width: "100%" }}>
+                <Button
+                  label="Add Money"
+                  onPress={() => router.push("/show-qr")}
+                />
+              </View>
             </Card>
             <Text style={styles.transactionsTitle}>Recent Transactions</Text>
           </View>
@@ -52,33 +63,36 @@ export default function WalletScreen() {
             message="Your wallet history will appear here."
           />
         }
-        renderItem={({ item }: { item: any }) => (
-          <Card style={styles.transactionCard}>
-            <View style={styles.transactionRow}>
-              <View style={styles.transactionDetails}>
-                <Text style={styles.transactionDescription}>{item.description}</Text>
-                <Text style={styles.transactionDate}>
-                  {new Date(item.createdAt).toLocaleString([], {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </Text>
+        renderItem={({ item }: { item: any }) => {
+          const isDebit = item.type === "DEBIT" || item.type === "BOOKING_DEBIT" || item.type === "PENALTY";
+          return (
+            <Card style={styles.transactionCard}>
+              <View style={styles.transactionRow}>
+                <View style={styles.transactionDetails}>
+                  <Text style={styles.transactionDescription}>{item.description}</Text>
+                  <Text style={styles.transactionDate}>
+                    {new Date(item.createdAt).toLocaleString([], {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </Text>
+                </View>
+                <View style={styles.transactionAmountContainer}>
+                  <Text
+                    style={[
+                      styles.transactionAmount,
+                      isDebit ? styles.debit : styles.credit,
+                    ]}
+                  >
+                    {isDebit ? "-" : "+"}₹{item.amount}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.transactionAmountContainer}>
-                <Text
-                  style={[
-                    styles.transactionAmount,
-                    item.type === "DEBIT" ? styles.debit : styles.credit,
-                  ]}
-                >
-                  {item.type === "DEBIT" ? "-" : "+"}₹{item.amount}
-                </Text>
-              </View>
-            </View>
-          </Card>
-        )}
+            </Card>
+          );
+        }}
       />
     </SafeAreaView>
   );

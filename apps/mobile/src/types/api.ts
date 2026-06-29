@@ -1,4 +1,4 @@
-export type BookingStatus = "BOOKED" | "ACTIVE" | "COMPLETED" | "CANCELLED";
+export type BookingStatus = "BOOKED" | "DRIVER_ASSIGNED" | "OTP_PENDING" | "IN_PROGRESS" | "ACTIVE" | "COMPLETED" | "CANCELLED" | "REASSIGNED" | "AT_RISK";
 
 export type ResidentUser = {
   id: string;

@@ -59,6 +59,22 @@ export function useVerifyOtp(bookingId: string) {
   });
 }
 
+export function useDriverArrive(bookingId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiRequest<{ success: boolean }>(`/driver/bookings/${bookingId}/arrive`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.driverDashboard,
+      });
+    },
+  });
+}
+
 export function useCompleteTrip(bookingId: string) {
   const queryClient = useQueryClient();
 

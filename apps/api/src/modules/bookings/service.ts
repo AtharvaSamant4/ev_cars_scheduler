@@ -29,6 +29,7 @@ type LockedQuota = {
 
 type LockedVehicle = {
   id: string;
+  hourlyRate: number;
 };
 
 export function residentFlatId(user: AuthUser) {
@@ -56,6 +57,7 @@ export function normalizeBookingRange(
   startValue: string,
   endValue: string,
   timezone: string,
+  userRole?: UserRole,
   now = new Date(),
 ): NormalizedRange {
   const startTime = new Date(startValue);
@@ -80,6 +82,17 @@ export function normalizeBookingRange(
       "INVALID_TIME_RANGE",
       "Bookings must start in the future",
     );
+  }
+
+  if (userRole !== UserRole.ADMIN) {
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    if (startTime.getTime() - now.getTime() > sevenDaysMs) {
+      throw new AppError(
+        400,
+        "INVALID_TIME_RANGE",
+        "Bookings can only be made up to 7 days in advance.",
+      );
+    }
   }
 
   if (
@@ -227,7 +240,7 @@ export async function checkAvailability(
 ) {
   const flatId = residentFlatId(user);
   const timezone = await societyTimezone(user.societyId);
-  const range = normalizeBookingRange(startValue, endValue, timezone);
+  const range = normalizeBookingRange(startValue, endValue, timezone, user.role);
 
   const [quota, availableVehicles] = await Promise.all([
     prisma.flatQuota.findUnique({
@@ -293,7 +306,7 @@ export async function createBooking(
 ) {
   const flatId = residentFlatId(user);
   const timezone = await societyTimezone(user.societyId);
-  const range = normalizeBookingRange(startValue, endValue, timezone);
+  const range = normalizeBookingRange(startValue, endValue, timezone, user.role);
 
   return serializable(() =>
     prisma.$transaction(
@@ -328,7 +341,7 @@ export async function createBooking(
         }
 
         const vehicles = await tx.$queryRaw<LockedVehicle[]>`
-          SELECT id 
+          SELECT id, "hourlyRate"
           FROM "Vehicle" 
           WHERE "societyId" = ${user.societyId}::uuid 
             AND "id" = ${vehicleId}::uuid
@@ -354,6 +367,17 @@ export async function createBooking(
           );
         }
 
+        const bookingCost = Math.round((range.durationMinutes / 60) * vehicle.hourlyRate);
+
+        const wallets = await tx.$queryRaw<{id: string, balance: number}[]>`
+          SELECT "id", "balance" FROM "Wallet" WHERE "userId" = ${user.id}::uuid FOR UPDATE
+        `;
+        const wallet = wallets[0];
+
+        if (!wallet || wallet.balance < bookingCost) {
+          throw new AppError(400, "INSUFFICIENT_BALANCE", "Insufficient wallet balance.");
+        }
+
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
         const booking = await tx.booking.create({
@@ -375,6 +399,21 @@ export async function createBooking(
                 id: true,
                 name: true,
                 registrationNumber: true,
+              },
+            },
+          },
+        });
+
+        await tx.wallet.update({
+          where: { id: wallet.id },
+          data: {
+            balance: { decrement: bookingCost },
+            transactions: {
+              create: {
+                amount: bookingCost,
+                type: TransactionType.BOOKING_DEBIT,
+                description: `Booking deduction for ${range.durationMinutes / 60} hours`,
+                bookingId: booking.id,
               },
             },
           },
@@ -413,8 +452,8 @@ export async function listResidentBookings(
     flatId,
     ...(view === "upcoming"
       ? {
-          status: BookingStatus.BOOKED,
-          startTime: { gt: now },
+          status: { notIn: [BookingStatus.CANCELLED, BookingStatus.COMPLETED] },
+          endTime: { gt: now },
         }
       : {
           OR: [
@@ -469,6 +508,8 @@ export async function getResidentBooking(user: AuthUser, bookingId: string) {
           registrationNumber: true,
         },
       },
+      driver: true,
+      invoice: true,
     },
   });
 
@@ -541,42 +582,52 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
           },
         });
 
-        // Apply flat 50rs penalty for cancellation
-        const penalty = 50;
+        const transactions = await tx.$queryRaw<{amount: number}[]>`
+          SELECT "amount" FROM "WalletTransaction"
+          WHERE "bookingId" = ${booking.id}::uuid AND "type" = 'BOOKING_DEBIT'
+        `;
+        const deduction = transactions[0]?.amount ?? 0;
 
         let wallet = await tx.wallet.findUnique({
           where: { userId: booking.userId },
         });
 
-        if (!wallet) {
-          wallet = await tx.wallet.create({
-            data: {
-              userId: booking.userId,
-              balance: 5000,
-              transactions: {
-                create: {
-                  amount: 5000,
-                  type: TransactionType.CREDIT,
-                  description: "Initial Promotional Balance",
-                },
+        if (wallet && deduction > 0) {
+          const rule = await tx.penaltyRule.findUnique({
+            where: {
+              societyId_code: {
+                societyId: booking.societyId,
+                code: "CANCELLATION",
               },
             },
           });
-        }
+          
+          const penaltyAmount = rule?.isActive ? rule.amount : 0;
 
-        const actualPenalty = Math.min(wallet.balance, penalty);
+          const transactionsToCreate: any[] = [
+            {
+              amount: deduction,
+              type: TransactionType.REFUND,
+              description: `Refund for cancelled booking on ${booking.startTime.toDateString()}`,
+              bookingId: booking.id,
+            }
+          ];
 
-        if (actualPenalty > 0) {
+          if (penaltyAmount > 0) {
+            transactionsToCreate.push({
+              amount: penaltyAmount,
+              type: TransactionType.PENALTY,
+              description: `Cancellation penalty`,
+              bookingId: booking.id,
+            });
+          }
+
           await tx.wallet.update({
             where: { id: wallet.id },
             data: {
-              balance: wallet.balance - actualPenalty,
+              balance: { increment: deduction - penaltyAmount },
               transactions: {
-                create: {
-                  amount: actualPenalty,
-                  type: TransactionType.DEBIT,
-                  description: `Flat cancellation penalty for booking on ${booking.startTime.toDateString()}`,
-                },
+                create: transactionsToCreate,
               },
             },
           });
@@ -659,8 +710,8 @@ export async function reassignBooking(
               FROM "Booking" 
               WHERE ("vehicleId" = ${reserveVehicleId}::uuid OR "reassignedVehicleId" = ${reserveVehicleId}::uuid)
                 AND "status" != 'CANCELLED'
-                AND "startTime" < ${booking.endTime}
-                AND "endTime" > ${booking.startTime}
+                AND "startTime" < ${new Date(booking.endTime.getTime() + 30 * 60000)}
+                AND "endTime" > ${new Date(booking.startTime.getTime() - 30 * 60000)}
             )
           FOR UPDATE
         `;
@@ -677,10 +728,11 @@ export async function reassignBooking(
         const updated = await tx.booking.update({
           where: { id: bookingId },
           data: {
+            status: booking.status === "AT_RISK" ? "BOOKED" : booking.status,
             reassignedVehicleId: vehicle.id,
             reassignedReason: reason,
             reassignedAt: new Date(),
-            reassignedByUserId: user.userId,
+            reassignedByUserId: user.id,
           },
           include: {
             vehicle: {
@@ -694,6 +746,24 @@ export async function reassignBooking(
           },
         });
 
+        await tx.reassignmentLog.create({
+          data: {
+            bookingId: booking.id,
+            originalVehicleId: booking.reassignedVehicleId || booking.vehicleId,
+            newVehicleId: vehicle.id,
+            reason: reason,
+            reassignedByUserId: user.id,
+          }
+        });
+
+        await tx.notification.create({
+          data: {
+            userId: booking.userId,
+            title: "Booking Reassigned",
+            message: `Your booking on ${booking.startTime.toLocaleDateString()} has been reassigned to ${vehicle.name}.`,
+          }
+        });
+
         return bookingResponse(updated);
       },
       {
@@ -703,4 +773,308 @@ export async function reassignBooking(
       },
     )
   );
+}
+
+export async function assignDriver(
+  user: AuthUser,
+  bookingId: string,
+  driverId: string
+) {
+  if (user.role !== "ADMIN") {
+    throw new AppError(403, "FORBIDDEN", "Only admins can assign drivers");
+  }
+
+  const driver = await prisma.driver.findUnique({
+    where: { id: driverId },
+  });
+
+  if (!driver || driver.societyId !== user.societyId) {
+    throw new AppError(404, "NOT_FOUND", "Driver not found");
+  }
+
+  if (!driver.isActive) {
+    throw new AppError(400, "INACTIVE", "Cannot assign an inactive driver");
+  }
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+  });
+
+  if (!booking || booking.societyId !== user.societyId) {
+    throw new AppError(404, "NOT_FOUND", "Booking not found");
+  }
+
+  if (booking.status === "CANCELLED" || booking.status === "COMPLETED") {
+    throw new AppError(409, "INVALID_STATUS", "Booking is no longer active");
+  }
+
+  const updatedStatus = booking.status === "BOOKED" ? "DRIVER_ASSIGNED" : booking.status;
+
+  const updated = await prisma.booking.update({
+    where: { id: bookingId },
+    data: { 
+      driverId,
+      status: updatedStatus 
+    },
+    include: {
+      vehicle: true,
+      driver: true,
+      user: true,
+      flat: true,
+    },
+  });
+
+  return bookingResponse(updated);
+}
+
+export async function driverArrive(user: AuthUser, bookingId: string) {
+  if (user.role !== "DRIVER") {
+    throw new AppError(403, "FORBIDDEN", "Only drivers can trigger arrival");
+  }
+
+  const fullUser = await prisma.user.findUnique({ where: { id: user.id } });
+  if (!fullUser || !fullUser.phone) {
+    throw new AppError(404, "NOT_FOUND", "User profile not found");
+  }
+
+  const driver = await prisma.driver.findFirst({
+    where: { phoneNumber: fullUser.phone },
+  });
+
+  if (!driver) {
+    throw new AppError(404, "NOT_FOUND", "Driver profile not found");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: bookingId, societyId: user.societyId },
+    });
+
+    if (!booking) {
+      throw new AppError(404, "NOT_FOUND", "Booking not found");
+    }
+
+    if (booking.vehicleId !== driver.vehicleId) {
+      throw new AppError(403, "FORBIDDEN", "You are not assigned to this vehicle");
+    }
+
+    if (booking.status !== "DRIVER_ASSIGNED" && booking.status !== "BOOKED") {
+      throw new AppError(400, "INVALID_STATUS", "Booking is not ready for arrival");
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 15 * 60000); // 15 mins
+
+    const updated = await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: "OTP_PENDING",
+        otp,
+        otpGeneratedAt: now,
+        otpExpiresAt: expiresAt,
+        otpAttempts: 0,
+        otpVerified: false,
+      },
+      include: {
+        vehicle: true,
+        driver: true,
+        user: true,
+        flat: true,
+      },
+    });
+
+    return bookingResponse(updated);
+  });
+}
+
+export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) {
+  if (user.role !== "DRIVER") {
+    throw new AppError(403, "FORBIDDEN", "Only drivers can verify OTP");
+  }
+
+  const fullUser = await prisma.user.findUnique({ where: { id: user.id } });
+  if (!fullUser || !fullUser.phone) {
+    throw new AppError(404, "NOT_FOUND", "User profile not found");
+  }
+
+  const driver = await prisma.driver.findFirst({
+    where: { phoneNumber: fullUser.phone },
+  });
+
+  if (!driver) {
+    throw new AppError(404, "NOT_FOUND", "Driver profile not found");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: bookingId, societyId: user.societyId },
+    });
+
+    if (!booking) {
+      throw new AppError(404, "NOT_FOUND", "Booking not found");
+    }
+
+    if (booking.vehicleId !== driver.vehicleId) {
+      throw new AppError(403, "FORBIDDEN", "You are not assigned to this vehicle");
+    }
+
+    if (booking.status !== "OTP_PENDING") {
+      throw new AppError(400, "INVALID_STATUS", "Booking is not pending OTP verification");
+    }
+
+    if (booking.otpAttempts >= 5) {
+      throw new AppError(400, "MAX_ATTEMPTS", "Maximum OTP attempts exceeded");
+    }
+
+    const now = new Date();
+
+    if (!booking.otpExpiresAt || now > booking.otpExpiresAt) {
+      throw new AppError(400, "OTP_EXPIRED", "OTP has expired");
+    }
+
+    if (booking.otp !== otp) {
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: { otpAttempts: { increment: 1 } },
+      });
+      throw new AppError(400, "INVALID_OTP", "Invalid OTP");
+    }
+
+    const updated = await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: "IN_PROGRESS",
+        otpVerified: true,
+        otpVerifiedAt: now,
+        actualRideStartTime: now,
+      },
+      include: {
+        vehicle: true,
+        driver: true,
+        user: true,
+        flat: true,
+      },
+    });
+
+    return bookingResponse(updated);
+  });
+}
+
+export async function completeTrip(user: AuthUser, bookingId: string, actualEndTimeValue?: string) {
+  if (user.role !== "DRIVER" && user.role !== "ADMIN") {
+    throw new AppError(403, "FORBIDDEN", "Only drivers or admins can complete trips");
+  }
+
+  let driverVehicleId: string | null = null;
+  if (user.role === "DRIVER") {
+    const fullUser = await prisma.user.findUnique({ where: { id: user.id } });
+    if (!fullUser || !fullUser.phone) {
+      throw new AppError(404, "NOT_FOUND", "User profile not found");
+    }
+
+    const driver = await prisma.driver.findFirst({
+      where: { phoneNumber: fullUser.phone },
+    });
+
+    if (!driver) {
+      throw new AppError(404, "NOT_FOUND", "Driver profile not found");
+    }
+    driverVehicleId = driver.vehicleId;
+  }
+
+  return serializable(() => prisma.$transaction(async (tx) => {
+    const booking = await tx.booking.findUnique({
+      where: { id: bookingId, societyId: user.societyId },
+      include: { vehicle: true },
+    });
+
+    if (!booking) {
+      throw new AppError(404, "NOT_FOUND", "Booking not found");
+    }
+
+    if (user.role === "DRIVER" && booking.vehicleId !== driverVehicleId) {
+      throw new AppError(403, "FORBIDDEN", "You are not assigned to this vehicle");
+    }
+
+    if (booking.status === "COMPLETED" || booking.status === "CANCELLED") {
+      throw new AppError(400, "INVALID_STATUS", "Booking is already completed or cancelled");
+    }
+
+    const actualEndTime = actualEndTimeValue ? new Date(actualEndTimeValue) : new Date();
+
+    const delayMs = actualEndTime.getTime() - booking.endTime.getTime();
+    const delayMinutes = Math.max(0, delayMs / 60000);
+    let penaltyAmount = 0;
+
+    const penaltyRule = await tx.penaltyRule.findUnique({
+      where: { societyId_code: { societyId: user.societyId, code: "LATE_RETURN_PER_HOUR" } }
+    });
+
+    if (delayMinutes > 0 && penaltyRule) {
+      const delayHours = Math.ceil(delayMinutes / 60);
+      penaltyAmount = delayHours * penaltyRule.amount;
+    }
+
+    if (penaltyAmount > 0 && penaltyRule) {
+      const wallets = await tx.$queryRaw<{id: string, balance: number}[]>`
+        SELECT "id", "balance" FROM "Wallet" WHERE "userId" = ${booking.userId}::uuid FOR UPDATE
+      `;
+      const wallet = wallets[0];
+      if (wallet) {
+        await tx.wallet.update({
+          where: { id: wallet.id },
+          data: { balance: { decrement: penaltyAmount } }
+        });
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            amount: penaltyAmount,
+            type: "PENALTY",
+            description: "Late Return Penalty",
+            bookingId: booking.id
+          }
+        });
+      }
+
+      await tx.penalty.create({
+        data: {
+          bookingId: booking.id,
+          penaltyRuleId: penaltyRule.id,
+          amount: penaltyAmount,
+          notes: "Late Return Penalty",
+          createdByAdminId: user.id,
+        }
+      });
+    }
+
+    const subtotal = Math.round((booking.durationMinutes / 60) * booking.vehicle.hourlyRate);
+    const totalAmount = subtotal + penaltyAmount;
+
+    await tx.invoice.create({
+      data: {
+        bookingId: booking.id,
+        subtotal,
+        penaltyAmount,
+        totalAmount
+      }
+    });
+
+    const updated = await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: "COMPLETED",
+        actualEndTime,
+      },
+      include: {
+        vehicle: true,
+        driver: true,
+        user: true,
+        flat: true,
+        invoice: true
+      },
+    });
+
+    return bookingResponse(updated);
+  }));
 }

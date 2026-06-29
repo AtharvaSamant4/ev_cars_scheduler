@@ -10,6 +10,10 @@ const sections = new Set([
   "vehicle-status",
   "drivers",
   "wallets",
+  "society-qr",
+  "recharge-requests",
+  "cancellation-settings",
+  "affected-bookings",
 ]);
 
 export default async function AdminSectionPage({

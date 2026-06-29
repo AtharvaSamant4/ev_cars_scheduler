@@ -17,19 +17,28 @@ enum VehicleStatus {
   AVAILABLE
   MAINTENANCE
   INACTIVE
+  BREAKDOWN
 }
 
 enum BookingStatus {
   BOOKED
+  DRIVER_ASSIGNED
+  OTP_PENDING
+  IN_PROGRESS
   ACTIVE
   COMPLETED
   CANCELLED
+  REASSIGNED
+  AT_RISK
 }
 
 enum TransactionType {
   CREDIT
   DEBIT
+  BOOKING_DEBIT
   REFUND
+  PENALTY
+  RECHARGE
 }
 
 enum ReassignReason {
@@ -37,6 +46,12 @@ enum ReassignReason {
   BREAKDOWN
   MAINTENANCE
   EMERGENCY
+}
+
+enum RechargeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 model Society {
@@ -49,6 +64,8 @@ model Society {
   users     User[]
   vehicles  Vehicle[]
   bookings  Booking[]
+  penaltyRules PenaltyRule[]
+  drivers   Driver[]
 }
 
 model Flat {
@@ -81,10 +98,14 @@ model User {
   updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
   society      Society   @relation(fields: [societyId], references: [id], onDelete: Restrict)
   flat         Flat?     @relation(fields: [flatId], references: [id], onDelete: Restrict)
-  bookings     Booking[]
-  driver             Driver?
+  bookings           Booking[]
   wallet             Wallet?
   reassignedBookings Booking[] @relation("BookingReassignedBy")
+  reassignmentLogs   ReassignmentLog[]
+  notifications      Notification[]
+  createdPenalties   Penalty[]
+  rechargeRequests   RechargeRequest[]
+  approvedRechargeRequests RechargeRequest[] @relation("ApprovedRechargeRequests")
 
   @@index([societyId, role, isActive])
 }
@@ -94,14 +115,19 @@ model Vehicle {
   societyId          String        @db.Uuid
   name               String        @db.VarChar(80)
   registrationNumber String        @db.VarChar(32)
+  hourlyRate         Int           @default(100)
   status             VehicleStatus @default(AVAILABLE)
   isReserve          Boolean       @default(false)
+  maintenanceReason  String?       @db.Text
+  expectedReturnDate DateTime?     @db.Timestamptz(3)
   createdAt          DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime      @updatedAt @db.Timestamptz(3)
   society            Society       @relation(fields: [societyId], references: [id], onDelete: Restrict)
   bookings           Booking[]
   reassignedBookings Booking[]     @relation("BookingReassignedVehicle")
-  drivers            Driver[]
+  originalReassignmentLogs ReassignmentLog[] @relation("LogOriginalVehicle")
+  newReassignmentLogs      ReassignmentLog[] @relation("LogNewVehicle")
+  drivers                  Driver[]
 
   @@unique([societyId, registrationNumber])
   @@index([societyId, status])
@@ -135,8 +161,13 @@ model Booking {
   durationMinutes Int
   status          BookingStatus @default(BOOKED)
   otp             String?       @db.VarChar(6)
+  otpGeneratedAt  DateTime?     @db.Timestamptz(3)
+  otpExpiresAt    DateTime?     @db.Timestamptz(3)
+  otpVerifiedAt   DateTime?     @db.Timestamptz(3)
   otpAttempts     Int           @default(0)
   otpVerified     Boolean       @default(false)
+  actualRideStartTime DateTime? @db.Timestamptz(3)
+  actualEndTime   DateTime?     @db.Timestamptz(3)
   startedAt       DateTime?     @db.Timestamptz(3)
   cancelledAt     DateTime?     @db.Timestamptz(3)
   createdAt       DateTime      @default(now()) @db.Timestamptz(3)
@@ -146,6 +177,9 @@ model Booking {
   flat                Flat            @relation(fields: [flatId], references: [id], onDelete: Restrict)
   user                User            @relation(fields: [userId], references: [id], onDelete: Restrict)
 
+  driverId            String?         @db.Uuid
+  driver              Driver?         @relation(fields: [driverId], references: [id], onDelete: SetNull)
+
   reassignedVehicleId String?         @db.Uuid
   reassignedAt        DateTime?       @db.Timestamptz(3)
   reassignedReason    ReassignReason?
@@ -153,6 +187,9 @@ model Booking {
 
   reassignedVehicle   Vehicle?        @relation("BookingReassignedVehicle", fields: [reassignedVehicleId], references: [id], onDelete: Restrict)
   reassignedByUser    User?           @relation("BookingReassignedBy", fields: [reassignedByUserId], references: [id], onDelete: Restrict)
+  penalties           Penalty[]
+  reassignmentLogs    ReassignmentLog[]
+  invoice             Invoice?
 
   @@index([societyId, status, startTime])
   @@index([vehicleId, startTime, endTime])
@@ -161,14 +198,22 @@ model Booking {
 }
 
 model Driver {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @unique @db.Uuid
-  vehicleId String?  @db.Uuid
-  createdAt DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @db.Timestamptz(3)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  id            String    @id @default(uuid()) @db.Uuid
+  societyId     String    @db.Uuid
+  fullName      String    @db.VarChar(120)
+  phoneNumber   String    @unique @db.VarChar(20)
+  email         String?   @db.VarChar(255)
+  licenseNumber String    @unique @db.VarChar(50)
+  isActive      Boolean   @default(true)
+  vehicleId     String?   @db.Uuid
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(3)
+  
+  society       Society   @relation(fields: [societyId], references: [id], onDelete: Restrict)
+  vehicle       Vehicle?  @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  bookings      Booking[]
 
+  @@index([societyId, isActive])
   @@index([vehicleId])
 }
 
@@ -188,9 +233,101 @@ model WalletTransaction {
   amount      Int
   type        TransactionType
   description String          @db.VarChar(255)
+  bookingId   String?         @db.Uuid
   createdAt   DateTime        @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime        @updatedAt @db.Timestamptz(3)
   wallet      Wallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@index([walletId, createdAt])
+}
+
+model ReassignmentLog {
+  id                  String         @id @default(uuid()) @db.Uuid
+  bookingId           String         @db.Uuid
+  originalVehicleId   String         @db.Uuid
+  newVehicleId        String         @db.Uuid
+  reassignedByUserId  String         @db.Uuid
+  reason              ReassignReason
+  createdAt           DateTime       @default(now()) @db.Timestamptz(3)
+
+  booking           Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  originalVehicle   Vehicle @relation("LogOriginalVehicle", fields: [originalVehicleId], references: [id], onDelete: Restrict)
+  newVehicle        Vehicle @relation("LogNewVehicle", fields: [newVehicleId], references: [id], onDelete: Restrict)
+  reassignedByUser  User    @relation(fields: [reassignedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([bookingId, createdAt])
+}
+
+model PenaltyRule {
+  id          String    @id @default(uuid()) @db.Uuid
+  societyId   String    @db.Uuid
+  name        String    @db.VarChar(100)
+  code        String    @db.VarChar(50)
+  amount      Int
+  isActive    Boolean   @default(true)
+  description String?   @db.Text
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+  society     Society   @relation(fields: [societyId], references: [id], onDelete: Restrict)
+  penalties   Penalty[]
+
+  @@unique([societyId, code])
+}
+
+model Penalty {
+  id               String      @id @default(uuid()) @db.Uuid
+  bookingId        String      @db.Uuid
+  penaltyRuleId    String      @db.Uuid
+  amount           Int
+  notes            String?     @db.Text
+  createdByAdminId String      @db.Uuid
+  createdAt        DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime    @updatedAt @db.Timestamptz(3)
+  booking          Booking     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  penaltyRule      PenaltyRule @relation(fields: [penaltyRuleId], references: [id], onDelete: Restrict)
+  createdByAdmin   User        @relation(fields: [createdByAdminId], references: [id], onDelete: Restrict)
+
+  @@unique([bookingId, penaltyRuleId])
+  @@index([bookingId])
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  title     String   @db.VarChar(255)
+  message   String   @db.Text
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model RechargeRequest {
+  id         String                @id @default(uuid()) @db.Uuid
+  userId     String                @db.Uuid
+  amount     Int
+  status     RechargeRequestStatus @default(PENDING)
+  notes      String?               @db.Text
+  approvedAt DateTime?             @db.Timestamptz(3)
+  approvedBy String?               @db.Uuid
+  createdAt  DateTime              @default(now()) @db.Timestamptz(3)
+
+  user         User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  approvedUser User? @relation("ApprovedRechargeRequests", fields: [approvedBy], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model Invoice {
+  id            String   @id @default(uuid()) @db.Uuid
+  bookingId     String   @unique @db.Uuid
+  subtotal      Int
+  penaltyAmount Int
+  totalAmount   Int
+  generatedAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  booking       Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 }

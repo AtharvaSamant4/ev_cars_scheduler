@@ -76,7 +76,11 @@ export function bookingRange(
 }
 
 export function statusLabel(status: BookingStatus) {
-  if (status === "BOOKED") return "Upcoming";
+  if (status === "BOOKED" || status === "DRIVER_ASSIGNED") return "Upcoming";
+  if (status === "OTP_PENDING") return "OTP Pending";
+  if (status === "IN_PROGRESS" || status === "ACTIVE") return "In Progress";
   if (status === "COMPLETED") return "Completed";
+  if (status === "REASSIGNED") return "Reassigned";
+  if (status === "AT_RISK") return "At Risk";
   return "Cancelled";
 }

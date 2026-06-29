@@ -13,13 +13,16 @@
   "dependencies": {
     "@society-ev/contracts": "workspace:*",
     "@society-ev/db": "workspace:*",
+    "@types/pdfkit": "^0.17.6",
     "bcryptjs": "3.0.3",
     "date-fns": "4.4.0",
     "date-fns-tz": "3.2.0",
     "jose": "6.2.3",
     "next": "16.2.7",
+    "pdfkit": "^0.19.1",
     "react": "19.2.7",
     "react-dom": "19.2.7",
+    "react-qr-code": "^2.2.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

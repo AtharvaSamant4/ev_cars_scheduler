@@ -44,12 +44,14 @@ export function BookingCard({
                 styles.status,
                 status === "CANCELLED" && styles.statusCancelled,
                 status === "COMPLETED" && styles.statusCompleted,
+                (status === "OTP_PENDING" || status === "IN_PROGRESS" || status === "ACTIVE") && styles.statusActive,
               ]}
             >
               <Text
                 style={[
                   styles.statusText,
                   status === "CANCELLED" && styles.statusTextCancelled,
+                  (status === "OTP_PENDING" || status === "IN_PROGRESS" || status === "ACTIVE") && styles.statusTextActive,
                 ]}
               >
                 {statusLabel(status)}
@@ -130,6 +132,12 @@ const styles = StyleSheet.create({
   },
   statusTextCancelled: {
     color: colors.danger,
+  },
+  statusActive: {
+    backgroundColor: colors.primary,
+  },
+  statusTextActive: {
+    color: colors.surface,
   },
   divider: {
     height: 1,

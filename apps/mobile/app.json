@@ -27,7 +27,13 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Society EV to access your camera to scan society QR codes."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -81,6 +81,8 @@ export default function BookingDetailsScreen() {
             styles.status,
             booking.data.effectiveStatus === "CANCELLED" &&
               styles.statusCancelled,
+            (booking.data.effectiveStatus === "OTP_PENDING" || booking.data.effectiveStatus === "IN_PROGRESS" || booking.data.effectiveStatus === "ACTIVE") &&
+              styles.statusActive,
           ]}
         >
           <Text
@@ -88,6 +90,8 @@ export default function BookingDetailsScreen() {
               styles.statusText,
               booking.data.effectiveStatus === "CANCELLED" &&
                 styles.statusTextCancelled,
+              (booking.data.effectiveStatus === "OTP_PENDING" || booking.data.effectiveStatus === "IN_PROGRESS" || booking.data.effectiveStatus === "ACTIVE") &&
+                styles.statusTextActive,
             ]}
           >
             {statusLabel(booking.data.effectiveStatus)}
@@ -108,8 +112,14 @@ export default function BookingDetailsScreen() {
           label="Duration"
           value={hoursLabel(booking.data.durationMinutes)}
         />
-        {booking.data.status === "BOOKED" && booking.data.otp && (
+        {booking.data.driver && (
+          <Detail label="Assigned Driver" value={`${booking.data.driver.fullName} (${booking.data.driver.phoneNumber})`} />
+        )}
+        {booking.data.status === "OTP_PENDING" && booking.data.otp && (
           <Detail label="OTP (Provide to Driver)" value={booking.data.otp} />
+        )}
+        {booking.data.actualRideStartTime && (
+          <Detail label="Actual Start Time" value={bookingTime(booking.data.actualRideStartTime, timezone)} />
         )}
         <Detail label="Booking ID" value={booking.data.id} />
       </Card>
@@ -124,6 +134,18 @@ export default function BookingDetailsScreen() {
           loading={cancellation.isPending}
           variant="danger"
           onPress={confirmCancellation}
+        />
+      ) : null}
+
+      {booking.data.status === "COMPLETED" && (booking.data as any).invoice ? (
+        <Button
+          label="Download Invoice PDF"
+          variant="primary"
+          onPress={() => {
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL || "http://192.168.21.232:3000/api/v1";
+            const url = `${apiUrl}/bookings/${booking.data.id}/invoice/pdf?token=${token}`;
+            import('react-native').then(rn => rn.Linking.openURL(url));
+          }}
         />
       ) : null}
 
@@ -191,6 +213,12 @@ const styles = StyleSheet.create({
   },
   statusTextCancelled: {
     color: colors.danger,
+  },
+  statusActive: {
+    backgroundColor: colors.primary,
+  },
+  statusTextActive: {
+    color: colors.surface,
   },
   details: {
     gap: spacing.md,
