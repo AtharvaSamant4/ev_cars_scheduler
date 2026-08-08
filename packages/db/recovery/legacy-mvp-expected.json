@@ -1,0 +1,45 @@
+{
+  "counts": {
+    "Society": 1,
+    "Flat": 3,
+    "User": 4,
+    "Vehicle": 5,
+    "FlatQuota": 3,
+    "Booking": 5
+  },
+  "society": {
+    "id": "10000000-0000-4000-8000-000000000001",
+    "name": "Legacy Green Meadows",
+    "timezone": "Asia/Kolkata"
+  },
+  "flats": [
+    { "id": "10000000-0000-4000-8000-000000000011", "number": "L101", "isActive": true },
+    { "id": "10000000-0000-4000-8000-000000000012", "number": "L102", "isActive": true },
+    { "id": "10000000-0000-4000-8000-000000000013", "number": "L103", "isActive": true }
+  ],
+  "users": [
+    { "id": "10000000-0000-4000-8000-000000000002", "flatId": null, "role": "ADMIN", "name": "Legacy Administrator", "email": "legacy-admin@example.invalid", "phone": null, "isActive": true },
+    { "id": "10000000-0000-4000-8000-000000000021", "flatId": "10000000-0000-4000-8000-000000000011", "role": "RESIDENT", "name": "Legacy Resident L101", "email": null, "phone": "7000000001", "isActive": true },
+    { "id": "10000000-0000-4000-8000-000000000022", "flatId": "10000000-0000-4000-8000-000000000012", "role": "RESIDENT", "name": "Legacy Resident L102", "email": null, "phone": "7000000002", "isActive": true },
+    { "id": "10000000-0000-4000-8000-000000000023", "flatId": "10000000-0000-4000-8000-000000000013", "role": "RESIDENT", "name": "Legacy Resident L103", "email": null, "phone": "7000000003", "isActive": true }
+  ],
+  "vehicles": [
+    { "id": "10000000-0000-4000-8000-000000000031", "name": "Legacy EV 1", "registrationNumber": "LEGACY-EV-1", "status": "AVAILABLE" },
+    { "id": "10000000-0000-4000-8000-000000000032", "name": "Legacy EV 2", "registrationNumber": "LEGACY-EV-2", "status": "AVAILABLE" },
+    { "id": "10000000-0000-4000-8000-000000000033", "name": "Legacy EV 3", "registrationNumber": "LEGACY-EV-3", "status": "MAINTENANCE" },
+    { "id": "10000000-0000-4000-8000-000000000034", "name": "Legacy EV 4", "registrationNumber": "LEGACY-EV-4", "status": "AVAILABLE" },
+    { "id": "10000000-0000-4000-8000-000000000035", "name": "Legacy EV 5", "registrationNumber": "LEGACY-EV-5", "status": "INACTIVE" }
+  ],
+  "quotas": [
+    { "id": "10000000-0000-4000-8000-000000000041", "flatId": "10000000-0000-4000-8000-000000000011", "year": 2025, "allocatedMinutes": 52560, "usedMinutes": 240 },
+    { "id": "10000000-0000-4000-8000-000000000042", "flatId": "10000000-0000-4000-8000-000000000012", "year": 2026, "allocatedMinutes": 52560, "usedMinutes": 180 },
+    { "id": "10000000-0000-4000-8000-000000000043", "flatId": "10000000-0000-4000-8000-000000000013", "year": 2026, "allocatedMinutes": 52560, "usedMinutes": 120 }
+  ],
+  "bookings": [
+    { "id": "10000000-0000-4000-8000-000000000051", "vehicleId": "10000000-0000-4000-8000-000000000031", "flatId": "10000000-0000-4000-8000-000000000011", "userId": "10000000-0000-4000-8000-000000000021", "quotaYear": 2025, "expectedQuotaYear": 2025, "expectedQuotaWeek": 52, "startTime": "2025-12-28T03:30:00.000Z", "endTime": "2025-12-28T05:30:00.000Z", "durationMinutes": 120, "status": "COMPLETED", "cancelledAt": null },
+    { "id": "10000000-0000-4000-8000-000000000052", "vehicleId": "10000000-0000-4000-8000-000000000032", "flatId": "10000000-0000-4000-8000-000000000011", "userId": "10000000-0000-4000-8000-000000000021", "quotaYear": 2025, "expectedQuotaYear": 2026, "expectedQuotaWeek": 1, "startTime": "2025-12-29T06:30:00.000Z", "endTime": "2025-12-29T08:30:00.000Z", "durationMinutes": 120, "status": "BOOKED", "cancelledAt": null },
+    { "id": "10000000-0000-4000-8000-000000000053", "vehicleId": "10000000-0000-4000-8000-000000000033", "flatId": "10000000-0000-4000-8000-000000000012", "userId": "10000000-0000-4000-8000-000000000022", "quotaYear": 2026, "expectedQuotaYear": 2026, "expectedQuotaWeek": 2, "startTime": "2026-01-05T04:30:00.000Z", "endTime": "2026-01-05T05:30:00.000Z", "durationMinutes": 60, "status": "CANCELLED", "cancelledAt": "2026-01-01T04:30:00.000Z" },
+    { "id": "10000000-0000-4000-8000-000000000054", "vehicleId": "10000000-0000-4000-8000-000000000034", "flatId": "10000000-0000-4000-8000-000000000012", "userId": "10000000-0000-4000-8000-000000000022", "quotaYear": 2026, "expectedQuotaYear": 2026, "expectedQuotaWeek": 3, "startTime": "2026-01-12T04:30:00.000Z", "endTime": "2026-01-12T07:30:00.000Z", "durationMinutes": 180, "status": "COMPLETED", "cancelledAt": null },
+    { "id": "10000000-0000-4000-8000-000000000055", "vehicleId": "10000000-0000-4000-8000-000000000035", "flatId": "10000000-0000-4000-8000-000000000013", "userId": "10000000-0000-4000-8000-000000000023", "quotaYear": 2026, "expectedQuotaYear": 2026, "expectedQuotaWeek": 6, "startTime": "2026-02-02T09:30:00.000Z", "endTime": "2026-02-02T11:30:00.000Z", "durationMinutes": 120, "status": "BOOKED", "cancelledAt": null }
+  ]
+}

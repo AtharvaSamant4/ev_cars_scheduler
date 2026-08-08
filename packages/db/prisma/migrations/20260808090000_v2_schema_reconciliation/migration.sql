@@ -45,10 +45,16 @@ ADD COLUMN "reassignedReason" "ReassignReason",
 ADD COLUMN "reassignedVehicleId" UUID,
 ADD COLUMN "startedAt" TIMESTAMPTZ(3);
 
-UPDATE "Booking"
+UPDATE "Booking" AS booking
 SET
-    "quotaYear" = EXTRACT(ISOYEAR FROM "startTime")::SMALLINT,
-    "quotaWeek" = EXTRACT(WEEK FROM "startTime")::SMALLINT;
+    "quotaYear" = EXTRACT(
+        ISOYEAR FROM (booking."startTime" AT TIME ZONE society."timezone")
+    )::SMALLINT,
+    "quotaWeek" = EXTRACT(
+        WEEK FROM (booking."startTime" AT TIME ZONE society."timezone")
+    )::SMALLINT
+FROM "Society" AS society
+WHERE society."id" = booking."societyId";
 
 ALTER TABLE "Booking" ALTER COLUMN "quotaWeek" SET NOT NULL;
 
