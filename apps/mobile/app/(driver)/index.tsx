@@ -97,7 +97,7 @@ export default function DriverDashboardScreen() {
         )}
       </Card>
 
-      <Text style={styles.sectionTitle}>Today's Trips</Text>
+      <Text style={styles.sectionTitle}>{"Today's Trips"}</Text>
       {data?.today?.length > 0 ? (
         data.today.map((trip: any) => <TripCard key={trip.id} trip={trip} />)
       ) : (
@@ -239,9 +239,27 @@ function TripCard({ trip }: { trip: any }) {
 }
 
 const styles = StyleSheet.create({
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loading: {
+    color: colors.textMuted,
+    fontSize: 16,
+  },
   screen: {
     padding: spacing.md,
     gap: spacing.md,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: spacing.md,
+  },
+  headerCopy: {
+    flex: 1,
   },
   card: {
     gap: spacing.sm,

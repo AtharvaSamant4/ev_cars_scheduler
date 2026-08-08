@@ -22,13 +22,18 @@ export default function BookingDetailsScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = typeof params.id === "string" ? params.id : "";
   const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
   const timezone =
     useAuthStore((state) => state.user?.society.timezone) ?? "Asia/Kolkata";
-  const booking = useBooking(id);
+  const booking = useBooking(id, user?.role === "RESIDENT");
   const cancellation = useCancelBooking(id);
 
-  if (!token) {
+  if (!token || !user) {
     return <Redirect href="/(auth)/login" />;
+  }
+
+  if (user.role !== "RESIDENT") {
+    return <Redirect href="/(driver)" />;
   }
 
   if (booking.isLoading) {
@@ -137,7 +142,7 @@ export default function BookingDetailsScreen() {
         />
       ) : null}
 
-      {booking.data.status === "COMPLETED" && (booking.data as any).invoice ? (
+      {booking.data.status === "COMPLETED" && booking.data.invoice ? (
         <Button
           label="Download Invoice PDF"
           variant="primary"

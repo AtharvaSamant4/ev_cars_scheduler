@@ -35,8 +35,23 @@ export type Dashboard = {
   };
 };
 
-export type VehicleStatus = "AVAILABLE" | "MAINTENANCE" | "INACTIVE";
-export type BookingStatus = "BOOKED" | "COMPLETED" | "CANCELLED";
+export type VehicleStatus = "AVAILABLE" | "MAINTENANCE" | "INACTIVE" | "BREAKDOWN";
+export type BookingStatus =
+  | "BOOKED"
+  | "DRIVER_ASSIGNED"
+  | "OTP_PENDING"
+  | "IN_PROGRESS"
+  | "ACTIVE"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "REASSIGNED"
+  | "AT_RISK";
+
+export type ReassignReason =
+  | "LATE_RETURN"
+  | "BREAKDOWN"
+  | "MAINTENANCE"
+  | "EMERGENCY";
 
 export type Vehicle = {
   id: string;
@@ -90,6 +105,52 @@ export type Resident = {
   } | null;
 };
 
+export type Driver = {
+  id: string;
+  societyId: string;
+  fullName: string;
+  phoneNumber: string;
+  email?: string | null;
+  licenseNumber: string;
+  isActive: boolean;
+  vehicleId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type VehicleSummary = Pick<
+  Vehicle,
+  "id" | "name" | "registrationNumber"
+>;
+
+export type Invoice = {
+  id: string;
+  bookingId: string;
+  subtotal: number;
+  penaltyAmount: number;
+  totalAmount: number;
+  generatedAt: string;
+};
+
+export type PenaltyRule = {
+  id: string;
+  name: string;
+  amount: number;
+  isActive: boolean;
+};
+
+export type ReassignmentLog = {
+  id: string;
+  reason: ReassignReason;
+  createdAt: string;
+  originalVehicle: VehicleSummary;
+  newVehicle: VehicleSummary;
+  reassignedByUser: {
+    id: string;
+    name: string;
+  };
+};
+
 export type Booking = {
   id: string;
   societyId: string;
@@ -97,19 +158,31 @@ export type Booking = {
   flatId: string;
   userId: string;
   quotaYear: number;
+  quotaWeek: number;
   startTime: string;
   endTime: string;
   durationMinutes: number;
   status: BookingStatus;
   effectiveStatus: BookingStatus;
+  otp?: string | null;
+  otpGeneratedAt?: string | null;
+  otpExpiresAt?: string | null;
+  otpVerifiedAt?: string | null;
+  otpAttempts?: number;
+  otpVerified?: boolean;
+  actualRideStartTime?: string | null;
+  actualEndTime?: string | null;
+  startedAt?: string | null;
   cancelledAt?: string | null;
+  driverId?: string | null;
+  driver?: Driver | null;
   reassignedVehicleId?: string | null;
-  reassignedReason?: string | null;
+  reassignedReason?: ReassignReason | null;
   reassignedAt?: string | null;
   createdAt: string;
   updatedAt: string;
-  vehicle: Vehicle;
-  reassignedVehicle?: Vehicle | null;
+  vehicle: VehicleSummary;
+  reassignedVehicle?: VehicleSummary | null;
   flat?: {
     id: string;
     number: string;
@@ -119,4 +192,6 @@ export type Booking = {
     name: string;
     phone?: string | null;
   };
+  invoice?: Invoice | null;
+  reassignmentLogs?: ReassignmentLog[];
 };

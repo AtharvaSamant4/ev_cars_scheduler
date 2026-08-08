@@ -3,11 +3,17 @@
 import { useState } from "react";
 import Link from "next/link";
 
-import { adminApi } from "./api";
+import { adminApi, errorMessage } from "./api";
 import { AdminShell, PageHeader, StatusPill } from "./admin-shell";
 import { dateTime, hours } from "./format";
 import { useAdminData } from "./hooks";
-import type { Booking, Vehicle, Paginated } from "./types";
+import type {
+  Booking,
+  Driver,
+  Paginated,
+  PenaltyRule,
+  Vehicle,
+} from "./types";
 
 function ReassignForm({ booking, onSaved }: { booking: Booking; onSaved: () => void }) {
   const [reserveVehicleId, setReserveVehicleId] = useState("");
@@ -34,8 +40,8 @@ function ReassignForm({ booking, onSaved }: { booking: Booking; onSaved: () => v
         body: JSON.stringify({ reserveVehicleId, reason }),
       });
       onSaved();
-    } catch (err: any) {
-      setError(err.message || "Failed to reassign");
+    } catch (error: unknown) {
+      setError(errorMessage(error));
     }
   }
 
@@ -87,7 +93,7 @@ function PenaltyForm({ booking, onSaved }: { booking: Booking; onSaved: () => vo
   const [error, setError] = useState<string | null>(null);
 
   const rules = useAdminData(
-    () => adminApi<any[]>("/admin/penalty-rules"),
+    () => adminApi<PenaltyRule[]>("/admin/penalty-rules"),
     [],
   );
 
@@ -106,8 +112,8 @@ function PenaltyForm({ booking, onSaved }: { booking: Booking; onSaved: () => vo
       onSaved();
       setPenaltyRuleId("");
       setNotes("");
-    } catch (err: any) {
-      setError(err.message || "Failed to apply penalty");
+    } catch (error: unknown) {
+      setError(errorMessage(error));
     }
   }
 
@@ -147,12 +153,12 @@ function PenaltyForm({ booking, onSaved }: { booking: Booking; onSaved: () => vo
   );
 }
 
-function AssignDriverForm({ booking, onSaved }: { booking: Booking & { driver?: any }, onSaved: () => void }) {
+function AssignDriverForm({ booking, onSaved }: { booking: Booking; onSaved: () => void }) {
   const [driverId, setDriverId] = useState(booking.driver?.id || "");
   const [error, setError] = useState<string | null>(null);
 
   const drivers = useAdminData(
-    () => adminApi<any[]>("/admin/drivers?includeInactive=false"),
+    () => adminApi<Driver[]>("/admin/drivers?includeInactive=false"),
     [],
   );
 
@@ -169,8 +175,8 @@ function AssignDriverForm({ booking, onSaved }: { booking: Booking & { driver?: 
         body: JSON.stringify({ driverId }),
       });
       onSaved();
-    } catch (err: any) {
-      setError(err.message || "Failed to assign driver");
+    } catch (error: unknown) {
+      setError(errorMessage(error));
     }
   }
 
@@ -200,7 +206,7 @@ function AssignDriverForm({ booking, onSaved }: { booking: Booking & { driver?: 
   );
 }
 
-function CompleteRideForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
+function CompleteRideForm({ booking, onSaved }: { booking: Booking; onSaved: () => void }) {
   const [actualEndTime, setActualEndTime] = useState(new Date().toISOString().slice(0, 16));
   const [error, setError] = useState<string | null>(null);
 
@@ -212,8 +218,8 @@ function CompleteRideForm({ booking, onSaved }: { booking: any; onSaved: () => v
         body: JSON.stringify({ actualEndTime: new Date(actualEndTime).toISOString() }),
       });
       onSaved();
-    } catch (err: any) {
-      setError(err.message || "Failed to complete ride");
+    } catch (error: unknown) {
+      setError(errorMessage(error));
     }
   }
 
@@ -237,7 +243,7 @@ function CompleteRideForm({ booking, onSaved }: { booking: any; onSaved: () => v
   );
 }
 
-function InvoiceCard({ booking }: { booking: any }) {
+function InvoiceCard({ booking }: { booking: Booking }) {
   if (!booking.invoice) return null;
   return (
     <div className="card form-card">
@@ -302,8 +308,8 @@ export function BookingDetail({ id }: { id: string }) {
             {booking.data.actualRideStartTime ? (
               <Detail label="Actual Start Time" value={dateTime(booking.data.actualRideStartTime)} />
             ) : null}
-            {(booking.data as any).actualEndTime ? (
-              <Detail label="Actual End Time" value={dateTime((booking.data as any).actualEndTime)} />
+            {booking.data.actualEndTime ? (
+              <Detail label="Actual End Time" value={dateTime(booking.data.actualEndTime)} />
             ) : null}
             {booking.data.otpVerifiedAt ? (
               <Detail label="OTP Verified At" value={dateTime(booking.data.otpVerifiedAt)} />
@@ -317,7 +323,7 @@ export function BookingDetail({ id }: { id: string }) {
           {(booking.data.effectiveStatus === "IN_PROGRESS" || booking.data.effectiveStatus === "ACTIVE" || booking.data.effectiveStatus === "BOOKED") ? (
             <CompleteRideForm booking={booking.data} onSaved={() => booking.reload()} />
           ) : null}
-          {(booking.data as any).invoice ? (
+          {booking.data.invoice ? (
             <InvoiceCard booking={booking.data} />
           ) : null}
           {booking.data.effectiveStatus !== "COMPLETED" && booking.data.effectiveStatus !== "CANCELLED" ? (
@@ -329,7 +335,7 @@ export function BookingDetail({ id }: { id: string }) {
           <PenaltyForm booking={booking.data} onSaved={() => booking.reload()} />
           
           {/* Audit Trail Panel */}
-          {(booking.data as any).reassignmentLogs && (booking.data as any).reassignmentLogs.length > 0 ? (
+          {booking.data.reassignmentLogs && booking.data.reassignmentLogs.length > 0 ? (
             <div className="card form-card span-2" style={{ gridColumn: "1 / -1" }}>
               <h2 className="panel-title">Reassignment Audit Trail</h2>
               <div className="table-wrap">
@@ -344,7 +350,7 @@ export function BookingDetail({ id }: { id: string }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {(booking.data as any).reassignmentLogs.map((log: any) => (
+                    {booking.data.reassignmentLogs.map((log) => (
                       <tr key={log.id}>
                         <td>{dateTime(log.createdAt)}</td>
                         <td>{log.originalVehicle.name}</td>

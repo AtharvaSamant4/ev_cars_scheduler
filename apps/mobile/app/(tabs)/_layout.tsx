@@ -8,13 +8,18 @@ import { colors } from "@/src/theme";
 export default function TabsLayout() {
   const hydrated = useAuthStore((state) => state.hydrated);
   const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
 
   if (!hydrated) {
     return <LoadingState label="Loading..." />;
   }
 
-  if (!token) {
+  if (!token || !user) {
     return <Redirect href="/(auth)/login" />;
+  }
+
+  if (user.role !== "RESIDENT") {
+    return <Redirect href="/(driver)" />;
   }
 
   return (

@@ -563,6 +563,8 @@ export async function getAdminBooking(user: AuthUser, id: string) {
     include: {
       vehicle: true,
       reassignedVehicle: true,
+      driver: true,
+      invoice: true,
       flat: { select: { id: true, number: true } },
       user: { select: { id: true, name: true, phone: true } },
       reassignmentLogs: {

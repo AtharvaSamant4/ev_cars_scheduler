@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
+import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import QRCode from "react-native-qrcode-svg";
 import { useRouter } from "expo-router";
@@ -53,7 +53,7 @@ export default function ShowQRScreen() {
 
       <View style={styles.content}>
         <Text style={styles.instructions}>
-          Scan this QR code with your phone's camera to securely add funds to your wallet.
+          {"Scan this QR code with your phone's camera to securely add funds to your wallet."}
         </Text>
 
         <View style={styles.qrWrapper}>
@@ -94,7 +94,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: colors.text,
     textAlign: "center",
-    marginBottom: spacing.xxxl,
+    marginBottom: spacing.xl,
     lineHeight: 28,
   },
   qrWrapper: {

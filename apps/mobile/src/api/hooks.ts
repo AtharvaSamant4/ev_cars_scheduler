@@ -97,10 +97,11 @@ export function useWallet() {
   });
 }
 
-export function useDashboard() {
+export function useDashboard(enabled = true) {
   return useQuery({
     queryKey: queryKeys.dashboard,
     queryFn: () => apiRequest<Dashboard>("/dashboard"),
+    enabled,
   });
 }
 
@@ -143,11 +144,11 @@ export function useBookings(view: "upcoming" | "history") {
   });
 }
 
-export function useBooking(id: string) {
+export function useBooking(id: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.booking(id),
     queryFn: () => apiRequest<Booking>(`/bookings/${id}`),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && enabled,
   });
 }
 

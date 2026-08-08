@@ -1,12 +1,11 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { prisma, ReassignReason, UserRole, BookingStatus } from "@society-ev/db";
+import { prisma, ReassignReason, UserRole } from "@society-ev/db";
 import { reassignBooking, createBooking, checkAvailability } from "@/src/modules/bookings/service";
 
 describe("Reserve Vehicle Integration", () => {
   let adminUser: any;
   let residentUser: any;
   let societyId: string;
-  let flatId: string;
   let normalVehicleId: string;
   let reserveVehicle1Id: string;
   let reserveVehicle2Id: string;
@@ -21,8 +20,6 @@ describe("Reserve Vehicle Integration", () => {
     const resident = await prisma.user.findFirst({ where: { role: UserRole.RESIDENT } });
     if (!resident || !resident.flatId) throw new Error("No resident found");
     residentUser = resident;
-    flatId = resident.flatId;
-
     // Create a normal vehicle and two reserve vehicles explicitly for testing
     const normalVehicle = await prisma.vehicle.create({
       data: { societyId, name: "Normal Test EV", registrationNumber: "NRM-001", isReserve: false, status: "AVAILABLE", hourlyRate: 100 }
@@ -73,8 +70,8 @@ describe("Reserve Vehicle Integration", () => {
   it("should reassign booking to reserve vehicle and create audit trail", async () => {
     const result = await reassignBooking(adminUser, bookingId, reserveVehicle1Id, ReassignReason.LATE_RETURN);
     
-    expect(result.booking.reassignedVehicleId).toBe(reserveVehicle1Id);
-    expect(result.booking.reassignedReason).toBe(ReassignReason.LATE_RETURN);
+    expect(result.reassignedVehicleId).toBe(reserveVehicle1Id);
+    expect(result.reassignedReason).toBe(ReassignReason.LATE_RETURN);
 
     // Verify Audit Trail
     const logs = await prisma.reassignmentLog.findMany({ where: { bookingId } });
@@ -89,8 +86,8 @@ describe("Reserve Vehicle Integration", () => {
     // Reassign again to the second reserve vehicle
     const result = await reassignBooking(adminUser, bookingId, reserveVehicle2Id, ReassignReason.BREAKDOWN);
     
-    expect(result.booking.reassignedVehicleId).toBe(reserveVehicle2Id);
-    expect(result.booking.reassignedReason).toBe(ReassignReason.BREAKDOWN);
+    expect(result.reassignedVehicleId).toBe(reserveVehicle2Id);
+    expect(result.reassignedReason).toBe(ReassignReason.BREAKDOWN);
 
     // Verify Audit Trail retains both logs
     const logs = await prisma.reassignmentLog.findMany({ where: { bookingId }, orderBy: { createdAt: 'asc' } });

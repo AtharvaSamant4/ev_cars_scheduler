@@ -1,4 +1,4 @@
-import { prisma, UserRole, TransactionType, VehicleStatus } from "@society-ev/db";
+import { prisma, UserRole, TransactionType } from "@society-ev/db";
 import { createBooking, cancelBooking } from "../src/modules/bookings/service";
 import { normalizeBookingRange } from "../src/modules/bookings/service";
 
@@ -125,7 +125,7 @@ async function runTests() {
       console.log("Transactions related to booking:");
       txs.forEach(tx => console.log(` - [${tx.type}] ₹${tx.amount} : ${tx.description}`));
       
-      const penaltyTx = txs.find(tx => tx.type === "CANCELLATION_PENALTY");
+      const penaltyTx = txs.find(tx => tx.type === TransactionType.PENALTY);
       if (penaltyTx) {
         console.log(`✅ PASSED: Cancellation penalty deducted correctly (₹${penaltyTx.amount}).`);
       } else {
@@ -148,7 +148,12 @@ async function runTests() {
     });
     if (res.count > 0) {
       await prisma.walletTransaction.create({
-        data: { walletId: resident.wallet!.id, amount: 10, type: "PAYMENT", description: "Burst Test" }
+        data: {
+          walletId: resident.wallet!.id,
+          amount: 10,
+          type: TransactionType.DEBIT,
+          description: "QA burst deduction",
+        }
       });
     }
   });

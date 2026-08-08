@@ -18,6 +18,8 @@ export async function generateInvoicePdf(bookingId: string, societyId: string, u
     throw new AppError(404, "NOT_FOUND", "Invoice not found for this booking");
   }
 
+  const invoice = booking.invoice;
+
   if (role === "RESIDENT" && booking.userId !== userId) {
     throw new AppError(403, "FORBIDDEN", "You don't have access to this invoice");
   }
@@ -73,14 +75,14 @@ export async function generateInvoicePdf(bookingId: string, societyId: string, u
       doc.fillColor(secondaryColor).fontSize(10).font('Helvetica')
          .text(booking.user.name, 65, 185)
          .text(`Flat ${booking.flat.number}`, 65, 200)
-         .text(booking.user.phoneNumber || '', 65, 215);
+         .text(booking.user.phone || '', 65, 215);
 
       // Vehicle Info
       doc.fillColor(primaryColor).fontSize(12).font('Helvetica-Bold').text('VEHICLE DETAILS', 330, 165);
       doc.fillColor(secondaryColor).fontSize(10).font('Helvetica')
          .text(`Vehicle: ${booking.vehicle.name}`, 330, 185)
          .text(`Reg No: ${booking.vehicle.registrationNumber}`, 330, 200)
-         .text(`Date: ${booking.invoice.generatedAt.toLocaleDateString()}`, 330, 215);
+         .text(`Date: ${invoice.generatedAt.toLocaleDateString()}`, 330, 215);
 
       // 3. Trip Timing Section
       doc.moveDown(4);
@@ -121,13 +123,13 @@ export async function generateInvoicePdf(bookingId: string, societyId: string, u
       currentY += 35;
       doc.fillColor(primaryColor).font('Helvetica');
       doc.text('Base Vehicle Charge', 60, currentY);
-      doc.text(`Rs. ${booking.invoice.subtotal.toFixed(2)}`, 0, currentY, { align: 'right', width: 535 });
+      doc.text(`Rs. ${invoice.subtotal.toFixed(2)}`, 0, currentY, { align: 'right', width: 535 });
 
       currentY += 25;
       doc.rect(50, currentY - 10, 495, 1).fill('#F3F4F6');
       doc.fillColor(primaryColor);
       doc.text('Late Return Penalty', 60, currentY);
-      doc.text(`Rs. ${booking.invoice.penaltyAmount.toFixed(2)}`, 0, currentY, { align: 'right', width: 535 });
+      doc.text(`Rs. ${invoice.penaltyAmount.toFixed(2)}`, 0, currentY, { align: 'right', width: 535 });
 
       // Total Row
       currentY += 35;
@@ -137,7 +139,7 @@ export async function generateInvoicePdf(bookingId: string, societyId: string, u
       doc.fillColor(primaryColor).fontSize(14).font('Helvetica-Bold');
       doc.text('TOTAL DEDUCTED', 60, currentY);
       doc.fillColor(accentColor).fontSize(18);
-      doc.text(`Rs. ${booking.invoice.totalAmount.toFixed(2)}`, 0, currentY - 2, { align: 'right', width: 535 });
+      doc.text(`Rs. ${invoice.totalAmount.toFixed(2)}`, 0, currentY - 2, { align: 'right', width: 535 });
 
       // PAID Stamp
       doc.save();

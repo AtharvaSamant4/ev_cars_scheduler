@@ -32,6 +32,11 @@ type LockedVehicle = {
   hourlyRate: number;
 };
 
+type LockedReserveVehicle = {
+  id: string;
+  name: string;
+};
+
 export function residentFlatId(user: AuthUser) {
   if (user.role !== UserRole.RESIDENT || !user.flatId) {
     throw new AppError(403, "FORBIDDEN", "A resident account is required");
@@ -588,7 +593,7 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
         `;
         const deduction = transactions[0]?.amount ?? 0;
 
-        let wallet = await tx.wallet.findUnique({
+        const wallet = await tx.wallet.findUnique({
           where: { userId: booking.userId },
         });
 
@@ -698,8 +703,8 @@ export async function reassignBooking(
           throw new AppError(409, "INVALID_STATUS", "Booking is no longer active");
         }
 
-        const vehicles = await tx.$queryRaw<LockedVehicle[]>`
-          SELECT id 
+        const vehicles = await tx.$queryRaw<LockedReserveVehicle[]>`
+          SELECT id, name
           FROM "Vehicle" 
           WHERE "societyId" = ${user.societyId}::uuid 
             AND "id" = ${reserveVehicleId}::uuid

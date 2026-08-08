@@ -1,4 +1,5 @@
 import { prisma, VehicleStatus, UserRole } from "@society-ev/db";
+import { getISOWeek, getISOWeekYear } from "date-fns";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 
 import { updateVehicle } from "@/src/modules/admin/service";
@@ -88,6 +89,8 @@ describe("Vehicle Maintenance & Booking Impact", () => {
         startTime: pastStart,
         endTime: pastEnd,
         durationMinutes: 60,
+        quotaYear: getISOWeekYear(pastStart),
+        quotaWeek: getISOWeek(pastStart),
         status: "COMPLETED",
       },
     });
@@ -102,6 +105,8 @@ describe("Vehicle Maintenance & Booking Impact", () => {
         startTime: futureStart,
         endTime: futureEnd,
         durationMinutes: 60,
+        quotaYear: getISOWeekYear(futureStart),
+        quotaWeek: getISOWeek(futureStart),
         status: "BOOKED",
       },
     });

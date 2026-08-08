@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import {
   RefreshControl,
   StyleSheet,
@@ -23,7 +23,7 @@ export default function DashboardScreen() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
-  const dashboard = useDashboard();
+  const dashboard = useDashboard(user?.role === "RESIDENT");
   const timezone = user?.society.timezone ?? "Asia/Kolkata";
 
   const confirmLogout = () => {
@@ -40,6 +40,10 @@ export default function DashboardScreen() {
       },
     });
   };
+
+  if (!user || user.role !== "RESIDENT") {
+    return <Redirect href={user?.role === "DRIVER" ? "/(driver)" : "/(auth)/login"} />;
+  }
 
   if (dashboard.isLoading) {
     return <LoadingState label="Loading your dashboard..." />;
@@ -71,7 +75,7 @@ export default function DashboardScreen() {
         <View style={styles.headerCopy}>
           <Text style={styles.kicker}>{user?.society.name}</Text>
           <Text style={styles.title}>Hello, {user?.name}</Text>
-          <Text style={styles.subtitle}>Flat {user?.flat.number}</Text>
+          <Text style={styles.subtitle}>Flat {user.flat.number}</Text>
         </View>
         <Button label="Logout" variant="secondary" onPress={confirmLogout} />
       </View>

@@ -6,16 +6,17 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { EmptyState, LoadingState } from "@/src/components/states";
 import { apiRequest } from "@/src/lib/api";
 import { colors, fonts, shadows } from "@/src/theme";
+import type { Notification } from "@/src/types/api";
 import { Ionicons } from "@expo/vector-icons";
 
 export default function NotificationsTab() {
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchNotifications = useCallback(async () => {
     try {
-      const data = await apiRequest<any[]>("/notifications");
+      const data = await apiRequest<Notification[]>("/notifications");
       setNotifications(data);
       // Mark as read in the background
       await apiRequest("/notifications", { method: "POST" }).catch(() => null);
@@ -55,9 +56,8 @@ export default function NotificationsTab() {
       >
         {notifications.length === 0 ? (
           <EmptyState
-            icon="notifications-outline"
-            message="No alerts"
-            description="You're all caught up."
+            title="No alerts"
+            message="You're all caught up."
           />
         ) : (
           notifications.map((notification) => (

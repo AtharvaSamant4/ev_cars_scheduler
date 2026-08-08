@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    borderRadius: radius.full,
+    borderRadius: radius.pill,
   },
   presetText: {
     color: colors.primary,
