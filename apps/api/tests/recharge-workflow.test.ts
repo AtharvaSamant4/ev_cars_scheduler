@@ -1,12 +1,14 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { prisma, UserRole } from "@society-ev/db";
+import type { Society } from "@society-ev/db";
+import type { AuthUser } from "@/src/lib/auth";
 import { createRechargeRequest, getResidentRechargeRequests } from "@/src/modules/wallet/service";
-import { processRechargeRequest, getAllRechargeRequests } from "@/src/modules/admin/service";
+import { processRechargeRequest } from "@/src/modules/admin/service";
 
 describe("Wallet Recharge Request Workflow", () => {
-  let admin: any;
-  let resident: any;
-  let society: any;
+  let admin: AuthUser;
+  let resident: AuthUser;
+  let society: Society;
 
   beforeAll(async () => {
     society = await prisma.society.create({

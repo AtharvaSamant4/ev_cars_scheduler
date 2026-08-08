@@ -1,7 +1,6 @@
 import { UserRole } from "@society-ev/db";
 import { describe, expect, it } from "vitest";
 
-import { AppError } from "@/src/lib/errors";
 import { normalizeBookingRange } from "@/src/modules/bookings/service";
 
 const timezone = "Asia/Kolkata";

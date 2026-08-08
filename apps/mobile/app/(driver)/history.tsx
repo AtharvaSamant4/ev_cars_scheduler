@@ -1,5 +1,4 @@
 import { RefreshControl, StyleSheet, Text, View } from "react-native";
-import { useQueryClient } from "@tanstack/react-query";
 
 import { useDriverHistory } from "@/src/api/hooks";
 import { Card } from "@/src/components/card";
@@ -45,7 +44,7 @@ export default function DriverHistoryScreen() {
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>No past trips</Text>
             <Text style={styles.emptyText}>
-              You haven't completed any trips yet.
+              {"You haven't completed any trips yet."}
             </Text>
           </View>
         ) : (

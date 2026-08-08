@@ -12,7 +12,7 @@ const schema = z.object({
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const POST = apiRoute(async (request, context: any) => {
+export const POST = apiRoute(async (request, context) => {
   const user = await requireAuth(request, UserRole.DRIVER);
   const data = await parseBody(request, schema);
   const id = await routeId(context);

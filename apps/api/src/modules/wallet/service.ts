@@ -42,21 +42,6 @@ export async function listAllWallets(user: AuthUser) {
     throw new AppError(403, "FORBIDDEN", "Only admins can view all wallets");
   }
 
-  const wallets = await prisma.wallet.findMany({
-    include: {
-      user: {
-        select: {
-          name: true,
-          phone: true,
-          flat: {
-            select: { number: true },
-          },
-        },
-      },
-    },
-    orderBy: { user: { name: "asc" } },
-  });
-
   // We only return actual created wallets. If an admin wants to adjust someone who hasn't opened their wallet yet, 
   // they won't see them here unless we fetch Users and left join wallets. Let's do that instead to be safe.
   const users = await prisma.user.findMany({

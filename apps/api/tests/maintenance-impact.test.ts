@@ -1,17 +1,19 @@
 import { prisma, VehicleStatus, UserRole } from "@society-ev/db";
+import type { Flat, Society, Vehicle } from "@society-ev/db";
 import { getISOWeek, getISOWeekYear } from "date-fns";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 
+import type { AuthUser } from "@/src/lib/auth";
 import { updateVehicle } from "@/src/modules/admin/service";
 import { getAffectedBookings } from "@/src/modules/admin/service";
 import { getNotifications } from "@/src/modules/residents/service";
 
 describe("Vehicle Maintenance & Booking Impact", () => {
-  let admin: any;
-  let resident: any;
-  let vehicle1: any;
-  let flat: any;
-  let society: any;
+  let admin: AuthUser;
+  let resident: AuthUser;
+  let vehicle1: Vehicle;
+  let flat: Flat;
+  let society: Society;
 
   beforeAll(async () => {
     society = await prisma.society.create({

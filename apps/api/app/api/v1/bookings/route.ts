@@ -1,6 +1,5 @@
 import {
   bookingListQuerySchema,
-  bookingRangeSchema,
   bookingCreateSchema,
 } from "@society-ev/contracts";
 import { UserRole } from "@society-ev/db";

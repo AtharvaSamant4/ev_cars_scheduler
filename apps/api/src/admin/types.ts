@@ -60,6 +60,8 @@ export type Vehicle = {
   registrationNumber: string;
   status: VehicleStatus;
   isReserve: boolean;
+  maintenanceReason?: string | null;
+  expectedReturnDate?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -122,6 +124,50 @@ export type VehicleSummary = Pick<
   Vehicle,
   "id" | "name" | "registrationNumber"
 >;
+
+export type DriverListItem = Driver & {
+  vehicle: VehicleSummary | null;
+  upcomingTripsCount: number;
+};
+
+export type WalletSummary = {
+  userId: string;
+  name: string;
+  phone: string | null;
+  flat?: string;
+  walletId: string | null;
+  balance: number;
+};
+
+export type AffectedBooking = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  status: BookingStatus;
+  vehicle: VehicleSummary;
+  user: {
+    id: string;
+    name: string;
+    phone: string | null;
+  };
+};
+
+export type RechargeRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type RechargeRequest = {
+  id: string;
+  amount: number;
+  notes: string | null;
+  status: RechargeRequestStatus;
+  createdAt: string;
+  user: {
+    id: string;
+    name: string;
+    phone: string | null;
+    flat: { number: string } | null;
+  };
+  approvedUser: { name: string } | null;
+};
 
 export type Invoice = {
   id: string;

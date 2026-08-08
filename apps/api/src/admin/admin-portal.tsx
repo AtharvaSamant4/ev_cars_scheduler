@@ -9,13 +9,17 @@ import { AdminShell, PageHeader, StatusPill } from "./admin-shell";
 import { dateInputToIso, dateTime, hours, minutesFromHours } from "./format";
 import { useAdminData } from "./hooks";
 import type {
+  AffectedBooking,
   Booking,
   Dashboard,
+  DriverListItem,
   Flat,
   Paginated,
+  RechargeRequest,
   Resident,
   Vehicle,
   VehicleStatus,
+  WalletSummary,
 } from "./types";
 
 const currentYear = new Date().getFullYear();
@@ -314,10 +318,10 @@ function VehicleForm({
       setRegistrationNumber(editing?.registrationNumber ?? "");
       setIsReserve(editing?.isReserve ? "true" : "false");
       setStatus(editing?.status ?? "AVAILABLE");
-      setMaintenanceReason((editing as any)?.maintenanceReason ?? "");
+      setMaintenanceReason(editing?.maintenanceReason ?? "");
       setExpectedReturnDate(
-        (editing as any)?.expectedReturnDate
-          ? new Date((editing as any).expectedReturnDate).toISOString().split("T")[0]
+        editing?.expectedReturnDate
+          ? new Date(editing.expectedReturnDate).toISOString().split("T")[0]
           : ""
       );
     });
@@ -1081,14 +1085,14 @@ function SelectField({
 
 function DriversScreen() {
   const drivers = useAdminData(
-    () => adminApi<any[]>("/admin/drivers?includeInactive=true"),
+    () => adminApi<DriverListItem[]>("/admin/drivers?includeInactive=true"),
     [],
   );
   const vehicles = useAdminData(
-    () => adminApi<any>("/admin/vehicles?pageSize=100"),
+    () => adminApi<Paginated<Vehicle>>("/admin/vehicles?pageSize=100"),
     [],
   );
-  const [editing, setEditing] = useState<any | null>(null);
+  const [editing, setEditing] = useState<DriverListItem | null>(null);
 
   return (
     <>
@@ -1114,7 +1118,7 @@ function DriversScreen() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((driver: any) => (
+                  {data.map((driver) => (
                     <tr key={driver.id}>
                       <td>
                         <strong>{driver.fullName}</strong>
@@ -1162,8 +1166,8 @@ function DriverForm({
   onCancel,
   onSaved,
 }: {
-  editing: any | null;
-  vehicles: any[];
+  editing: DriverListItem | null;
+  vehicles: Vehicle[];
   onCancel: () => void;
   onSaved: () => void;
 }) {
@@ -1265,10 +1269,10 @@ function DriverForm({
 
 function WalletsScreen() {
   const wallets = useAdminData(
-    () => adminApi<any>("/admin/wallets"),
+    () => adminApi<WalletSummary[]>("/admin/wallets"),
     [],
   );
-  const [adjustingUser, setAdjustingUser] = useState<any | null>(null);
+  const [adjustingUser, setAdjustingUser] = useState<WalletSummary | null>(null);
 
   return (
     <>
@@ -1290,7 +1294,7 @@ function WalletsScreen() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((item: any) => (
+                  {data.map((item) => (
                     <tr key={item.userId}>
                       <td>
                         <strong>{item.name}</strong>
@@ -1344,7 +1348,7 @@ function WalletAdjustForm({
   onCancel,
   onSaved,
 }: {
-  user: any;
+  user: WalletSummary;
   onCancel: () => void;
   onSaved: () => void;
 }) {
@@ -1420,16 +1424,11 @@ function CancellationSettingsScreen() {
     []
   );
   
-  const [amountStr, setAmountStr] = useState("");
+  const [editedAmount, setEditedAmount] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (penaltyData.data) {
-      setAmountStr(String(penaltyData.data.amount));
-    }
-  }, [penaltyData.data]);
+  const amountStr = editedAmount ?? String(penaltyData.data?.amount ?? "");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1451,6 +1450,7 @@ function CancellationSettingsScreen() {
       });
       setMessage("Cancellation settings updated successfully.");
       await penaltyData.reload();
+      setEditedAmount(null);
     } catch (currentError) {
       setError(errorMessage(currentError));
     } finally {
@@ -1471,7 +1471,7 @@ function CancellationSettingsScreen() {
             label="Cancellation Penalty Amount (₹)"
             type="number"
             value={amountStr}
-            onChange={setAmountStr}
+            onChange={setEditedAmount}
           />
           <Message error={error} success={message} />
           <div className="actions">
@@ -1487,7 +1487,7 @@ function CancellationSettingsScreen() {
 
 function AffectedBookingsScreen() {
   const affectedBookings = useAdminData(
-    () => adminApi<any>("/admin/bookings/affected"),
+    () => adminApi<AffectedBooking[]>("/admin/bookings/affected"),
     [],
   );
 
@@ -1512,7 +1512,7 @@ function AffectedBookingsScreen() {
                 </tr>
               </thead>
               <tbody>
-                {data.map((booking: any) => (
+                {data.map((booking) => (
                   <tr key={booking.id}>
                     <td>{booking.vehicle.name}</td>
                     <td>{dateTime(booking.startTime)}</td>
@@ -1547,7 +1547,7 @@ function AffectedBookingsScreen() {
 function RechargeRequestsScreen() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const requests = useAdminData(
-    () => adminApi<any>(`/admin/recharge-requests?status=${statusFilter}`),
+    () => adminApi<Paginated<RechargeRequest>>(`/admin/recharge-requests?status=${statusFilter}`),
     [statusFilter],
   );
 
@@ -1596,7 +1596,7 @@ function RechargeRequestsScreen() {
                 </tr>
               </thead>
               <tbody>
-                {data.items.map((req: any) => (
+                {data.items.map((req) => (
                   <tr key={req.id}>
                     <td>{new Date(req.createdAt).toLocaleString()}</td>
                     <td>

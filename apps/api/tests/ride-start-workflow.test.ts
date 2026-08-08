@@ -1,14 +1,16 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { prisma, UserRole, BookingStatus, VehicleStatus } from "@society-ev/db";
+import type { Driver, Society, Vehicle } from "@society-ev/db";
+import type { AuthUser } from "@/src/lib/auth";
 import { assignDriver, driverArrive, verifyOtp } from "@/src/modules/bookings/service";
 
 describe("Ride Start OTP Workflow", () => {
-  let admin: any;
-  let driverUser: any;
-  let driverProfile: any;
-  let resident: any;
-  let society: any;
-  let vehicle: any;
+  let admin: AuthUser;
+  let driverUser: AuthUser;
+  let driverProfile: Driver;
+  let resident: AuthUser;
+  let society: Society;
+  let vehicle: Vehicle;
   let bookingId: string;
 
   beforeAll(async () => {

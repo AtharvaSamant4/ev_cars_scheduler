@@ -1,10 +1,11 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { prisma, ReassignReason, UserRole } from "@society-ev/db";
+import type { AuthUser } from "@/src/lib/auth";
 import { reassignBooking, createBooking, checkAvailability } from "@/src/modules/bookings/service";
 
 describe("Reserve Vehicle Integration", () => {
-  let adminUser: any;
-  let residentUser: any;
+  let adminUser: AuthUser;
+  let residentUser: AuthUser;
   let societyId: string;
   let normalVehicleId: string;
   let reserveVehicle1Id: string;
@@ -15,7 +16,7 @@ describe("Reserve Vehicle Integration", () => {
     const admin = await prisma.user.findFirst({ where: { role: UserRole.ADMIN } });
     if (!admin) throw new Error("No admin found");
     societyId = admin.societyId;
-    adminUser = { id: admin.id, role: admin.role, societyId: admin.societyId, name: admin.name || "Admin" };
+    adminUser = admin;
 
     const resident = await prisma.user.findFirst({ where: { role: UserRole.RESIDENT } });
     if (!resident || !resident.flatId) throw new Error("No resident found");

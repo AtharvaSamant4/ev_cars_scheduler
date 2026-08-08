@@ -609,7 +609,7 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
           
           const penaltyAmount = rule?.isActive ? rule.amount : 0;
 
-          const transactionsToCreate: any[] = [
+          const transactionsToCreate: Prisma.WalletTransactionCreateWithoutWalletInput[] = [
             {
               amount: deduction,
               type: TransactionType.REFUND,
@@ -687,7 +687,7 @@ export async function reassignBooking(
   return serializable(() =>
     prisma.$transaction(
       async (tx) => {
-        const bookings = await tx.$queryRaw<any[]>`
+        const bookings = await tx.$queryRaw<Prisma.BookingModel[]>`
           SELECT * FROM "Booking"
           WHERE "id" = ${bookingId}::uuid
             AND "societyId" = ${user.societyId}::uuid

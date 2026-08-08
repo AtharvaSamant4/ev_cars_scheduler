@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, UserRole, BookingStatus } from "@society-ev/db";
+import type { AuthUser } from "@/src/lib/auth";
 import { createBooking } from "@/src/modules/bookings/service";
 
 describe("Booking 30-Minute Buffer System", () => {
-  let adminUser: any;
-  let residentUser: any;
+  let residentUser: AuthUser;
   let societyId: string;
   let flatId: string;
   let vehicle1Id: string;
@@ -15,12 +15,6 @@ describe("Booking 30-Minute Buffer System", () => {
     if (!admin) throw new Error("No admin found");
     societyId = admin.societyId;
     
-    adminUser = {
-      id: admin.id,
-      role: admin.role,
-      societyId: admin.societyId,
-    };
-
     const resident = await prisma.user.findFirst({ where: { role: UserRole.RESIDENT } });
     if (!resident || !resident.flatId) throw new Error("No resident found");
     residentUser = resident;

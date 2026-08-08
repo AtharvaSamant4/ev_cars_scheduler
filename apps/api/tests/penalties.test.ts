@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, UserRole } from "@society-ev/db";
+import type { AuthUser } from "@/src/lib/auth";
 import { getCancellationPenaltyAmount, updateCancellationPenaltyAmount } from "@/src/modules/penalties/service";
 
 describe("Cancellation Penalty System", () => {
-  let adminUser: any;
+  let adminUser: AuthUser;
   let societyId: string;
 
   beforeAll(async () => {
@@ -13,11 +14,7 @@ describe("Cancellation Penalty System", () => {
     if (!admin) throw new Error("No admin found");
     
     societyId = admin.societyId;
-    adminUser = {
-      id: admin.id,
-      role: admin.role,
-      societyId: admin.societyId,
-    };
+    adminUser = admin;
   });
 
   afterAll(async () => {

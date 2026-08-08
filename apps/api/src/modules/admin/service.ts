@@ -4,6 +4,7 @@ import {
   BookingStatus,
   Prisma,
   prisma,
+  RechargeRequestStatus,
   UserRole,
   VehicleStatus,
 } from "@society-ev/db";
@@ -601,9 +602,24 @@ export async function getAffectedBookings(user: AuthUser) {
 }
 
 export async function getAllRechargeRequests(user: AuthUser, page: number, status?: string) {
-  const where: any = { user: { societyId: user.societyId } };
+  const where: Prisma.RechargeRequestWhereInput = {
+    user: { societyId: user.societyId },
+  };
   if (status && status !== "ALL") {
-    where.status = status;
+    const rechargeStatus =
+      status === RechargeRequestStatus.PENDING
+        ? RechargeRequestStatus.PENDING
+        : status === RechargeRequestStatus.APPROVED
+          ? RechargeRequestStatus.APPROVED
+          : status === RechargeRequestStatus.REJECTED
+            ? RechargeRequestStatus.REJECTED
+            : null;
+
+    if (!rechargeStatus) {
+      throw new AppError(400, "INVALID_STATUS", "Invalid recharge request status");
+    }
+
+    where.status = rechargeStatus;
   }
 
   const pageSize = 50;

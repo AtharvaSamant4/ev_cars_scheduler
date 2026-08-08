@@ -1,7 +1,4 @@
-import {
-  adminEntityListQuerySchema,
-  driverCreateSchema,
-} from "@society-ev/contracts";
+import { driverCreateSchema } from "@society-ev/contracts";
 import { UserRole } from "@society-ev/db";
 
 import { requireAuth } from "@/src/lib/auth";
@@ -9,7 +6,6 @@ import {
   apiRoute,
   ok,
   parseBody,
-  parseQuery,
 } from "@/src/lib/http";
 import {
   createDriver,

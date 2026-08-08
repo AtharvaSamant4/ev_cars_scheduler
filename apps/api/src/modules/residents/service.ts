@@ -1,12 +1,10 @@
 import { BookingStatus, prisma, UserRole } from "@society-ev/db";
-import { toZonedTime } from "date-fns-tz";
 
 import type { AuthUser } from "@/src/lib/auth";
 import { AppError } from "@/src/lib/errors";
 import {
   bookingResponse,
   residentFlatId,
-  checkAvailability,
 } from "@/src/modules/bookings/service";
 import { getIsoWeek } from "@/src/lib/date";
 

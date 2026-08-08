@@ -1,4 +1,4 @@
-import { prisma, BookingStatus } from "@society-ev/db";
+import { prisma, BookingStatus, Prisma } from "@society-ev/db";
 import type { AuthUser } from "@/src/lib/auth";
 import { AppError } from "@/src/lib/errors";
 
@@ -7,7 +7,7 @@ export async function listDrivers(user: AuthUser, includeInactive = false) {
     throw new AppError(403, "FORBIDDEN", "Only admins can view drivers");
   }
 
-  const where: any = { societyId: user.societyId };
+  const where: Prisma.DriverWhereInput = { societyId: user.societyId };
   if (!includeInactive) {
     where.isActive = true;
   }
@@ -21,7 +21,9 @@ export async function listDrivers(user: AuthUser, includeInactive = false) {
   });
 
   const now = new Date();
-  const activeVehicleIds = drivers.map(d => d.vehicleId).filter(Boolean) as string[];
+  const activeVehicleIds = drivers
+    .map((driver) => driver.vehicleId)
+    .filter((vehicleId): vehicleId is string => vehicleId !== null);
 
   const upcomingCounts = await prisma.booking.groupBy({
     by: ["vehicleId"],

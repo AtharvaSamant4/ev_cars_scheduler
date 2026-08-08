@@ -5,7 +5,7 @@ import { useWallet } from "@/src/api/hooks";
 import { Card } from "@/src/components/card";
 import { EmptyState, ErrorState, LoadingState } from "@/src/components/states";
 import { errorMessage } from "@/src/lib/api";
-import { colors, radius, spacing } from "@/src/theme";
+import { colors, spacing } from "@/src/theme";
 
 import { Button } from "@/src/components/button";
 

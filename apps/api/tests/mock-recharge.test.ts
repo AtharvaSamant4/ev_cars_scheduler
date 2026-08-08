@@ -1,10 +1,12 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { prisma, UserRole } from "@society-ev/db";
+import type { Society } from "@society-ev/db";
+import type { AuthUser } from "@/src/lib/auth";
 import { mockRechargeWallet } from "@/src/modules/wallet/service";
 
 describe("Mock QR Wallet Recharge Flow", () => {
-  let resident: any;
-  let society: any;
+  let resident: AuthUser;
+  let society: Society;
 
   beforeAll(async () => {
     society = await prisma.society.create({

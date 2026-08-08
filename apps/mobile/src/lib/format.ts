@@ -1,4 +1,4 @@
-import { addDays, format } from "date-fns";
+import { format } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 import type { BookingStatus } from "@/src/types/api";

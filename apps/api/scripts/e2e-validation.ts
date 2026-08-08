@@ -4,26 +4,84 @@ import * as path from "path";
 
 const API_URL = "http://localhost:3000/api/v1";
 
-const report: any = {
+type ApiPayload = {
+  token?: string;
+  flatId?: string;
+  societyId?: string;
+  available?: boolean;
+  booking?: { id: string };
+  data?: ApiPayload;
+  raw?: string;
+};
+
+type PhaseResult = {
+  status: "SUCCESS" | "FAILED";
+  durationMs: number;
+  result?: unknown;
+  error?: string;
+};
+
+type ValidationReport = {
+  phases: Record<string, PhaseResult>;
+  summary: Record<string, unknown>;
+};
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function parseApiPayload(value: unknown): ApiPayload {
+  if (typeof value !== "object" || value === null) {
+    return { raw: typeof value === "string" ? value : JSON.stringify(value) };
+  }
+
+  let booking: ApiPayload["booking"];
+  if (
+    "booking" in value &&
+    typeof value.booking === "object" &&
+    value.booking !== null &&
+    "id" in value.booking &&
+    typeof value.booking.id === "string"
+  ) {
+    booking = { id: value.booking.id };
+  }
+
+  return {
+    token: "token" in value && typeof value.token === "string" ? value.token : undefined,
+    flatId: "flatId" in value && typeof value.flatId === "string" ? value.flatId : undefined,
+    societyId:
+      "societyId" in value && typeof value.societyId === "string"
+        ? value.societyId
+        : undefined,
+    available:
+      "available" in value && typeof value.available === "boolean"
+        ? value.available
+        : undefined,
+    booking,
+    data: "data" in value ? parseApiPayload(value.data) : undefined,
+  };
+}
+
+const report: ValidationReport = {
   phases: {},
   summary: {},
 };
 
-async function logPhase(phaseName: string, execute: () => Promise<any>) {
+async function logPhase<T>(phaseName: string, execute: () => Promise<T>) {
   console.log(`\n=== Starting ${phaseName} ===`);
   const start = Date.now();
   try {
     const result = await execute();
     report.phases[phaseName] = { status: "SUCCESS", durationMs: Date.now() - start, result };
     console.log(`[SUCCESS] ${phaseName}`);
-  } catch (err: any) {
-    report.phases[phaseName] = { status: "FAILED", durationMs: Date.now() - start, error: err.message || String(err) };
+  } catch (err: unknown) {
+    report.phases[phaseName] = { status: "FAILED", durationMs: Date.now() - start, error: errorMessage(err) };
     console.error(`[FAILED] ${phaseName}:`, err);
   }
 }
 
-async function request(endpoint: string, method: string = "GET", body?: any, token?: string) {
-  const headers: any = {
+async function request(endpoint: string, method: string = "GET", body?: unknown, token?: string) {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (token) {
@@ -37,11 +95,12 @@ async function request(endpoint: string, method: string = "GET", body?: any, tok
   });
   const latency = Date.now() - start;
   const text = await res.text();
-  let data;
+  let data: ApiPayload;
   try {
-    data = JSON.parse(text);
-  } catch (e) {
-    data = text;
+    const parsed: unknown = JSON.parse(text);
+    data = parseApiPayload(parsed);
+  } catch {
+    data = { raw: text };
   }
   
   // Extract token from cookie if present
@@ -74,20 +133,20 @@ async function main() {
     // Test Valid Admin
     const adminRes = await request("/auth/admin/login", "POST", { email: "admin@greenmeadows.demo", password: "Admin@123" });
     if (adminRes.status !== 200) throw new Error("Admin login failed");
-    adminToken = adminRes.cookieToken || adminRes.data?.token || adminRes.data?.data?.token;
+    adminToken = adminRes.cookieToken || adminRes.data.token || adminRes.data.data?.token || "";
     
     // Test Valid Resident
     const resRes = await request("/auth/resident/login", "POST", { flatNumber: "A101", password: "Demo@123" });
     if (resRes.status !== 200) throw new Error("Resident login failed");
-    residentToken = resRes.cookieToken || resRes.data?.token || resRes.data?.data?.token;
+    residentToken = resRes.cookieToken || resRes.data.token || resRes.data.data?.token || "";
     
     const meRes = await request("/me", "GET", undefined, residentToken);
     if (meRes.status !== 200) {
       console.error("ME RES ERROR:", meRes);
       throw new Error(`Failed to get /me with residentToken. Token: ${residentToken}`);
     }
-    residentFlatId = meRes.data?.flatId || meRes.data?.data?.flatId;
-    societyId = meRes.data?.societyId || meRes.data?.data?.societyId;
+    residentFlatId = meRes.data.flatId || meRes.data.data?.flatId || "";
+    societyId = meRes.data.societyId || meRes.data.data?.societyId || "";
 
     // Test Invalid Login
     const invRes = await request("/auth/resident/login", "POST", { flatNumber: "A101", password: "WrongPassword" });
@@ -152,7 +211,8 @@ async function main() {
       console.error("BOOKING FAILED:", bookRes.data);
       throw new Error(`Booking failed: ${JSON.stringify(bookRes.data)}`);
     }
-    const bookingId = bookRes.data.booking.id;
+    const bookingId = bookRes.data.booking?.id;
+    if (!bookingId) throw new Error("Booking response did not include an ID");
 
     // Verify DB
     const dbBooking = await prisma.booking.findUnique({ where: { id: bookingId } });
@@ -182,7 +242,7 @@ async function main() {
           durationMinutes: 60
         }
       });
-    } catch (e) {
+    } catch {
       caught = true;
     }
     if (!caught) throw new Error("Database accepted invalid foreign key");
@@ -211,8 +271,9 @@ async function main() {
     const conflicts = results.filter(r => r.status === 409);
     
     // Cleanup the created booking
-    if (successes.length > 0 && successes[0].data.booking) {
-        await request(`/bookings/${successes[0].data.booking.id}`, "DELETE", undefined, residentToken);
+    const successfulBooking = successes[0]?.data.booking;
+    if (successfulBooking) {
+        await request(`/bookings/${successfulBooking.id}`, "DELETE", undefined, residentToken);
     }
     
     if (successes.length > 1) {
@@ -257,7 +318,6 @@ async function main() {
 
   await logPhase("Phase 9: Performance Validation", async () => {
     // 50 requests
-    const start = Date.now();
     const promises = [];
     for (let i = 0; i < 50; i++) {
       promises.push(request("/health", "GET"));

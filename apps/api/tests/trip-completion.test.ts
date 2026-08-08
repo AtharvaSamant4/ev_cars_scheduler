@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { prisma } from "@society-ev/db";
-import { completeTrip } from "../src/modules/bookings/service";
+import { describe, it, expect } from "vitest";
 
 // Assume we have a test db setup or we can mock prisma
 describe("Trip Completion & Penalty Engine", () => {

@@ -6,14 +6,21 @@ import { completeTrip } from "@/src/modules/bookings/service";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const POST = apiRoute(async (request, context: any) => {
+export const POST = apiRoute(async (request, context) => {
   const user = await requireAuth(request, UserRole.DRIVER);
   const id = await routeId(context);
   
   let actualEndTimeValue: string | undefined;
   try {
-    const body = await request.json();
-    actualEndTimeValue = body?.actualEndTime;
+    const body: unknown = await request.json();
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      "actualEndTime" in body &&
+      typeof body.actualEndTime === "string"
+    ) {
+      actualEndTimeValue = body.actualEndTime;
+    }
   } catch {
     // ignore parsing error
   }

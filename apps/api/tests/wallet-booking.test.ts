@@ -1,38 +1,25 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { prisma, UserRole, TransactionType } from "@society-ev/db";
-import { AppError } from "@/src/lib/errors";
+import type { AuthUser } from "@/src/lib/auth";
 import { createBooking, cancelBooking } from "@/src/modules/bookings/service";
-import { toZonedTime } from "date-fns-tz";
 
 describe("Wallet Booking Integration", () => {
-  let societyId: string;
-  let flatId: string;
   let userId: string;
   let vehicleId: string;
   let vehicleRate: number;
-  let adminUser: any;
-  let residentUser: any;
+  let residentUser: AuthUser;
 
   beforeAll(async () => {
     // We assume the DB is seeded. We will just pick the first available vehicle and resident.
     const society = await prisma.society.findFirst();
     if (!society) throw new Error("No society found");
-    societyId = society.id;
-
     const resident = await prisma.user.findFirst({
       where: { role: UserRole.RESIDENT },
       include: { flat: true },
     });
     if (!resident || !resident.flatId) throw new Error("No resident found");
     userId = resident.id;
-    flatId = resident.flatId;
-
-    residentUser = {
-      id: resident.id,
-      societyId: society.id,
-      role: UserRole.RESIDENT,
-      flatId: resident.flatId,
-    };
+    residentUser = resident;
 
     const vehicle = await prisma.vehicle.findFirst({
       where: { status: "AVAILABLE", isReserve: false },
