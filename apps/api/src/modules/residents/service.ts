@@ -69,6 +69,13 @@ export async function getDashboard(user: AuthUser) {
             registrationNumber: true,
           },
         },
+        reassignedVehicle: {
+          select: {
+            id: true,
+            name: true,
+            registrationNumber: true,
+          },
+        },
       },
       orderBy: { startTime: "asc" },
       take: 5,

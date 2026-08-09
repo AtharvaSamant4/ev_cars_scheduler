@@ -127,6 +127,9 @@ export default function DriverDashboardScreen() {
                 <Text style={styles.subtitle}>
                   Resident: {trip.user.name} (Flat {trip.flat.number})
                 </Text>
+                <Text style={styles.kicker}>
+                  EV: {trip.effectiveVehicle.name} ({trip.effectiveVehicle.registrationNumber})
+                </Text>
               </View>
             </View>
           </Card>
@@ -183,6 +186,9 @@ function TripCard({ trip }: { trip: any }) {
             Resident: {trip.user.name} (Flat {trip.flat.number})
           </Text>
           <Text style={styles.kicker}>Phone: {trip.user.phone}</Text>
+          <Text style={styles.kicker}>
+            EV: {trip.effectiveVehicle.name} ({trip.effectiveVehicle.registrationNumber})
+          </Text>
         </View>
       </View>
 

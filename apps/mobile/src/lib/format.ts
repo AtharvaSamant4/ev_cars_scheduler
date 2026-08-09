@@ -8,6 +8,14 @@ export function hoursLabel(minutes: number) {
   return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hrs`;
 }
 
+export function currencyLabel(value: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 export function bookingDate(value: string, timezone: string) {
   return formatInTimeZone(value, timezone, "EEE, d MMM yyyy");
 }

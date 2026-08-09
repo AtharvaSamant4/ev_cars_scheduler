@@ -26,6 +26,7 @@ type BookingResult = {
     actualRideStartTime?: string | null;
     actualEndTime?: string | null;
     reassignedVehicleId?: string | null;
+    reassignedVehicle?: { id: string } | null;
     invoice?: {
       subtotal: number;
       penaltyAmount: number;
@@ -228,6 +229,8 @@ async function main() {
     if (!affected.some((booking) => booking.id === atRisk.booking.id)) throw new Error("Maintenance booking was not marked AT_RISK");
     const reassigned = await jsonRequest<BookingResult["booking"]>(`admin/bookings/${atRisk.booking.id}/reassign`, jsonBody({ reserveVehicleId: reserveVehicle.id, reason: "MAINTENANCE" }), adminToken);
     if (reassigned.status !== "BOOKED" || reassigned.reassignedVehicleId !== reserveVehicle.id) throw new Error("Reserve reassignment did not restore the booking");
+    const residentReassigned = await jsonRequest<BookingResult["booking"]>(`bookings/${atRisk.booking.id}`, {}, residentToken);
+    if (residentReassigned.reassignedVehicle?.id !== reserveVehicle.id) throw new Error("Resident booking detail did not expose the effective reserve vehicle");
 
     const issue = await jsonRequest<{ success: boolean; vehicle: { status: string } }>("driver/vehicle/report-issue", jsonBody({}), driverToken);
     if (!issue.success || issue.vehicle.status !== "BREAKDOWN") throw new Error("Driver report-issue endpoint did not mark the vehicle as BREAKDOWN");

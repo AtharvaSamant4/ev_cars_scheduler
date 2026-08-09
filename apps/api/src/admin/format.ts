@@ -3,6 +3,14 @@ export function hours(minutes: number) {
   return `${Number.isInteger(value) ? value : value.toFixed(1)} hrs`;
 }
 
+export function currency(value: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 export function minutesFromHours(value: string) {
   return Math.round(Number(value) * 60);
 }
@@ -24,7 +32,12 @@ export function dateInputToIso(value: string, endOfDay = false) {
 }
 
 export function statusClass(status: string) {
-  if (status === "MAINTENANCE" || status === "BOOKED") {
+  if (
+    status === "MAINTENANCE" ||
+    status === "BREAKDOWN" ||
+    status === "AT_RISK" ||
+    status === "BOOKED"
+  ) {
     return "warning";
   }
 

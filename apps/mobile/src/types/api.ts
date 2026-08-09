@@ -78,6 +78,7 @@ export type Booking = {
     generatedAt: string;
   } | null;
   vehicle: VehicleSummary;
+  reassignedVehicle?: VehicleSummary | null;
 };
 
 export type Notification = {

@@ -5,6 +5,8 @@ const API_URL = (
   process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:3000/api/v1"
 ).replace(/\/$/, "");
 
+export const apiBaseUrl = API_URL;
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,

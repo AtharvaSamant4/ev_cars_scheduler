@@ -6,7 +6,7 @@ import { Button } from "@/src/components/button";
 import { Card } from "@/src/components/card";
 import { ErrorState, LoadingState } from "@/src/components/states";
 import { Screen } from "@/src/components/screen";
-import { errorMessage } from "@/src/lib/api";
+import { apiBaseUrl, errorMessage } from "@/src/lib/api";
 import { confirmAction, notify } from "@/src/lib/alerts";
 import {
   bookingDate,
@@ -50,20 +50,21 @@ export default function BookingDetailsScreen() {
   }
 
   const canCancel =
-    booking.data.status === "BOOKED" &&
+    (booking.data.status === "BOOKED" || booking.data.status === "AT_RISK") &&
     new Date(booking.data.startTime) > new Date();
+  const vehicle = booking.data.reassignedVehicle ?? booking.data.vehicle;
 
   const confirmCancellation = () => {
     confirmAction({
       title: "Cancel this booking?",
-      message: "The full booking duration will be restored to your quota.",
+      message: "Your quota will be restored and any active cancellation penalty will be applied to your wallet.",
       confirmLabel: "Cancel booking",
       cancelLabel: "Keep booking",
       destructive: true,
       onConfirm: async () => {
         try {
           await cancellation.mutateAsync();
-          notify("Booking cancelled", "Your quota was restored.");
+          notify("Booking cancelled", "Your quota was restored and your wallet was updated.");
         } catch (error) {
           notify("Could not cancel", errorMessage(error));
         }
@@ -77,9 +78,9 @@ export default function BookingDetailsScreen() {
         <View style={styles.vehicleBadge}>
           <Text style={styles.vehicleBadgeText}>EV</Text>
         </View>
-        <Text style={styles.vehicle}>{booking.data.vehicle.name}</Text>
+        <Text style={styles.vehicle}>{vehicle.name}</Text>
         <Text style={styles.registration}>
-          {booking.data.vehicle.registrationNumber}
+          {vehicle.registrationNumber}
         </Text>
         <View
           style={[
@@ -147,8 +148,7 @@ export default function BookingDetailsScreen() {
           label="Download Invoice PDF"
           variant="primary"
           onPress={() => {
-            const apiUrl = process.env.EXPO_PUBLIC_API_URL || "http://192.168.21.232:3000/api/v1";
-            const url = `${apiUrl}/bookings/${booking.data.id}/invoice/pdf?token=${token}`;
+            const url = `${apiBaseUrl}/bookings/${booking.data.id}/invoice/pdf?token=${token}`;
             import('react-native').then(rn => rn.Linking.openURL(url));
           }}
         />

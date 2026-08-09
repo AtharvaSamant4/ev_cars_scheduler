@@ -20,11 +20,12 @@ export function BookingCard({
   onPress: () => void;
 }) {
   const status = booking.effectiveStatus;
+  const vehicle = booking.reassignedVehicle ?? booking.vehicle;
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open booking for ${booking.vehicle.name}`}
+      accessibilityLabel={`Open booking for ${vehicle.name}`}
       onPress={onPress}
     >
       {({ pressed }) => (
@@ -34,9 +35,9 @@ export function BookingCard({
               <Text style={styles.vehicleBadgeText}>EV</Text>
             </View>
             <View style={styles.titleGroup}>
-              <Text style={styles.vehicle}>{booking.vehicle.name}</Text>
+              <Text style={styles.vehicle}>{vehicle.name}</Text>
               <Text style={styles.registration}>
-                {booking.vehicle.registrationNumber}
+                {vehicle.registrationNumber}
               </Text>
             </View>
             <View
@@ -44,6 +45,7 @@ export function BookingCard({
                 styles.status,
                 status === "CANCELLED" && styles.statusCancelled,
                 status === "COMPLETED" && styles.statusCompleted,
+                status === "AT_RISK" && styles.statusAtRisk,
                 (status === "OTP_PENDING" || status === "IN_PROGRESS" || status === "ACTIVE") && styles.statusActive,
               ]}
             >
@@ -51,6 +53,7 @@ export function BookingCard({
                 style={[
                   styles.statusText,
                   status === "CANCELLED" && styles.statusTextCancelled,
+                  status === "AT_RISK" && styles.statusTextAtRisk,
                   (status === "OTP_PENDING" || status === "IN_PROGRESS" || status === "ACTIVE") && styles.statusTextActive,
                 ]}
               >
@@ -125,6 +128,9 @@ const styles = StyleSheet.create({
   statusCancelled: {
     backgroundColor: colors.dangerSoft,
   },
+  statusAtRisk: {
+    backgroundColor: colors.warningSoft,
+  },
   statusText: {
     color: colors.success,
     fontSize: 11,
@@ -132,6 +138,9 @@ const styles = StyleSheet.create({
   },
   statusTextCancelled: {
     color: colors.danger,
+  },
+  statusTextAtRisk: {
+    color: colors.warning,
   },
   statusActive: {
     backgroundColor: colors.primary,

@@ -5,6 +5,7 @@ import { useWallet } from "@/src/api/hooks";
 import { Card } from "@/src/components/card";
 import { EmptyState, ErrorState, LoadingState } from "@/src/components/states";
 import { errorMessage } from "@/src/lib/api";
+import { currencyLabel } from "@/src/lib/format";
 import { colors, spacing } from "@/src/theme";
 
 import { Button } from "@/src/components/button";
@@ -46,7 +47,7 @@ export default function WalletScreen() {
             <Text style={styles.kicker}>MY WALLET</Text>
             <Card style={styles.balanceCard}>
               <Text style={styles.balanceLabel}>Available Balance</Text>
-              <Text style={styles.balanceAmount}>₹{data.balance}</Text>
+              <Text style={styles.balanceAmount}>{currencyLabel(data.balance)}</Text>
               <View style={{ marginTop: spacing.lg, width: "100%" }}>
                 <Button
                   label="Add Money"
@@ -86,7 +87,7 @@ export default function WalletScreen() {
                       isDebit ? styles.debit : styles.credit,
                     ]}
                   >
-                    {isDebit ? "-" : "+"}₹{item.amount}
+                    {isDebit ? "-" : "+"}{currencyLabel(item.amount)}
                   </Text>
                 </View>
               </View>

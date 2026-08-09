@@ -520,6 +520,13 @@ export async function listResidentBookings(
             registrationNumber: true,
           },
         },
+        reassignedVehicle: {
+          select: {
+            id: true,
+            name: true,
+            registrationNumber: true,
+          },
+        },
       },
       orderBy:
         view === "upcoming"
@@ -547,6 +554,13 @@ export async function getResidentBooking(user: AuthUser, bookingId: string) {
     },
     include: {
       vehicle: {
+        select: {
+          id: true,
+          name: true,
+          registrationNumber: true,
+        },
+      },
+      reassignedVehicle: {
         select: {
           id: true,
           name: true,

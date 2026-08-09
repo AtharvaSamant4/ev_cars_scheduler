@@ -6,7 +6,7 @@ import QRCode from "react-qr-code";
 
 import { adminApi, errorMessage, qs } from "./api";
 import { AdminShell, PageHeader, StatusPill } from "./admin-shell";
-import { dateInputToIso, dateTime, hours, minutesFromHours } from "./format";
+import { currency, dateInputToIso, dateTime, hours, minutesFromHours } from "./format";
 import { useAdminData } from "./hooks";
 import type {
   AffectedBooking,
@@ -1098,7 +1098,7 @@ function DriversScreen() {
     <>
       <PageHeader
         title="Driver Management"
-        subtitle="Manage society drivers and their statuses independently of user accounts."
+        subtitle="Manage driver profiles, vehicle assignments, and activity."
       />
 
       <div className="grid two-col">
@@ -1303,7 +1303,7 @@ function WalletsScreen() {
                       <td>{item.flat || "None"}</td>
                       <td>
                         <strong style={{ color: "var(--success)", fontSize: 18 }}>
-                          ₹{item.balance}
+                          {currency(item.balance)}
                         </strong>
                       </td>
                       <td>
@@ -1602,7 +1602,7 @@ function RechargeRequestsScreen() {
                     <td>
                       {req.user.name} ({req.user.flat?.number})
                     </td>
-                    <td>₹{req.amount}</td>
+                    <td>{currency(req.amount)}</td>
                     <td>{req.notes || "-"}</td>
                     <td>
                       <StatusPill value={req.status} />

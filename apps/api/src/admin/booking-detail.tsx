@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { adminApi, errorMessage } from "./api";
 import { AdminShell, PageHeader, StatusPill } from "./admin-shell";
-import { dateTime, hours } from "./format";
+import { currency, dateTime, hours } from "./format";
 import { useAdminData } from "./hooks";
 import type {
   Booking,
@@ -131,7 +131,7 @@ function PenaltyForm({ booking, onSaved }: { booking: Booking; onSaved: () => vo
         >
           <option value="">Select penalty...</option>
           {activeRules.map((r) => (
-            <option key={r.id} value={r.id}>{r.name} (₹{r.amount})</option>
+            <option key={r.id} value={r.id}>{r.name} ({currency(r.amount)})</option>
           ))}
         </select>
       </div>
@@ -248,9 +248,9 @@ function InvoiceCard({ booking }: { booking: Booking }) {
   return (
     <div className="card form-card">
       <h2 className="panel-title">Invoice</h2>
-      <Detail label="Vehicle Charge" value={`Rs. ${booking.invoice.subtotal}`} />
-      <Detail label="Late Return Penalty" value={`Rs. ${booking.invoice.penaltyAmount}`} />
-      <Detail label="Total Amount" value={`Rs. ${booking.invoice.totalAmount}`} />
+      <Detail label="Vehicle Charge" value={currency(booking.invoice.subtotal)} />
+      <Detail label="Late Return Penalty" value={currency(booking.invoice.penaltyAmount)} />
+      <Detail label="Total Amount" value={currency(booking.invoice.totalAmount)} />
       <div className="actions" style={{ marginTop: 16 }}>
         <a href={`/api/v1/bookings/${booking.id}/invoice/pdf`} className="button secondary" target="_blank" rel="noreferrer">
           Download PDF Invoice
