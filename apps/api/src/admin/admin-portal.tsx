@@ -156,7 +156,7 @@ function DashboardScreen() {
       mostUsed: mostUsed ? `${mostUsed.name} (${mostUsed.count})` : "No data",
       utilization:
         vehicleCount > 0
-          ? `${Math.round((totalMinutes / (vehicleCount * 876 * 60)) * 100)}%`
+          ? `${Math.round((totalMinutes / (vehicleCount * 16 * 60)) * 100)}%`
           : "0%",
     };
   }, [bookings.data, vehicles.data]);
@@ -418,7 +418,7 @@ function FlatsScreen() {
     <>
       <PageHeader
         title="Flat Management"
-        subtitle="Maintain society flats and initial yearly quota allocations."
+        subtitle="Maintain society flats and weekly quota allocations."
       />
       <div className="grid two-col">
         <DataCard state={flats}>
@@ -497,7 +497,7 @@ function FlatForm({
   onSaved: () => void;
 }) {
   const [number, setNumber] = useState("");
-  const [allocatedHours, setAllocatedHours] = useState("876");
+  const [allocatedHours, setAllocatedHours] = useState("16");
   const [isActive, setIsActive] = useState("true");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -800,7 +800,7 @@ function QuotaScreen() {
 function QuotaRow({ flat, onSaved }: { flat: Flat; onSaved: () => void }) {
   const quota = flat.quotas[0];
   const [allocatedHours, setAllocatedHours] = useState(
-    quota ? String(quota.allocatedMinutes / 60) : "876",
+    quota ? String(quota.allocatedMinutes / 60) : "16",
   );
   const [error, setError] = useState<string | null>(null);
   const remaining = quota ? quota.allocatedMinutes - quota.usedMinutes : 0;

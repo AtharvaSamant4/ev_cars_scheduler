@@ -1,50 +1,32 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, UserRole } from "@society-ev/db";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
 import type { AuthUser } from "@/src/lib/auth";
 import { getCancellationPenaltyAmount, updateCancellationPenaltyAmount } from "@/src/modules/penalties/service";
+import { cleanupSocietyFixture } from "@/tests/helpers/database";
 
-describe("Cancellation Penalty System", () => {
-  let adminUser: AuthUser;
+describe("Cancellation penalty settings", () => {
+  let admin: AuthUser;
   let societyId: string;
 
   beforeAll(async () => {
-    const admin = await prisma.user.findFirst({
-      where: { role: UserRole.ADMIN },
-    });
-    if (!admin) throw new Error("No admin found");
-    
-    societyId = admin.societyId;
-    adminUser = admin;
-  });
-
-  afterAll(async () => {
-    await prisma.penaltyRule.deleteMany({
-      where: { code: "CANCELLATION" }
+    const society = await prisma.society.create({ data: { name: "Penalty Fixture Society", timezone: "Asia/Kolkata" } });
+    societyId = society.id;
+    admin = await prisma.user.create({
+      data: { societyId, role: UserRole.ADMIN, name: "Penalty Admin", phone: "9100000031", passwordHash: "fixture-hash" },
     });
   });
 
-  it("should return 0 when no cancellation penalty is configured", async () => {
-    await prisma.penaltyRule.deleteMany({
-      where: { societyId, code: "CANCELLATION" }
-    });
+  afterAll(async () => cleanupSocietyFixture(societyId));
 
-    const result = await getCancellationPenaltyAmount(adminUser);
-    expect(result.amount).toBe(0);
+  it("returns zero when no cancellation rule exists", async () => {
+    await expect(getCancellationPenaltyAmount(admin)).resolves.toEqual({ amount: 0 });
   });
 
-  it("should allow admin to update cancellation penalty", async () => {
-    const result = await updateCancellationPenaltyAmount(adminUser, 500);
-    expect(result.amount).toBe(500);
-
-    const check = await getCancellationPenaltyAmount(adminUser);
-    expect(check.amount).toBe(500);
-  });
-
-  it("should allow admin to update an existing cancellation penalty", async () => {
-    const result = await updateCancellationPenaltyAmount(adminUser, 1000);
-    expect(result.amount).toBe(1000);
-
-    const check = await getCancellationPenaltyAmount(adminUser);
-    expect(check.amount).toBe(1000);
+  it("creates and then updates the society-scoped rule", async () => {
+    await expect(updateCancellationPenaltyAmount(admin, 500)).resolves.toEqual({ amount: 500 });
+    await expect(updateCancellationPenaltyAmount(admin, 1_000)).resolves.toEqual({ amount: 1_000 });
+    await expect(getCancellationPenaltyAmount(admin)).resolves.toEqual({ amount: 1_000 });
+    await expect(prisma.penaltyRule.count({ where: { societyId, code: "CANCELLATION" } })).resolves.toBe(1);
   });
 });

@@ -45,7 +45,7 @@ export async function listAllWallets(user: AuthUser) {
   // We only return actual created wallets. If an admin wants to adjust someone who hasn't opened their wallet yet, 
   // they won't see them here unless we fetch Users and left join wallets. Let's do that instead to be safe.
   const users = await prisma.user.findMany({
-    where: { role: "RESIDENT" },
+    where: { societyId: user.societyId, role: "RESIDENT" },
     include: {
       flat: { select: { number: true } },
       wallet: true,
@@ -79,15 +79,28 @@ export async function adjustWalletBalance(
   }
 
   return await prisma.$transaction(async (tx) => {
+    const resident = await tx.user.findFirst({
+      where: {
+        id: residentUserId,
+        societyId: adminUser.societyId,
+        role: "RESIDENT",
+      },
+      select: { id: true },
+    });
+
+    if (!resident) {
+      throw new AppError(404, "NOT_FOUND", "Resident not found");
+    }
+
     let wallet = await tx.wallet.findUnique({
-      where: { userId: residentUserId },
+      where: { userId: resident.id },
     });
 
     if (!wallet) {
       // Lazy initialization on adjustment
       wallet = await tx.wallet.create({
         data: {
-          userId: residentUserId,
+          userId: resident.id,
           balance: 5000,
           transactions: {
             create: {

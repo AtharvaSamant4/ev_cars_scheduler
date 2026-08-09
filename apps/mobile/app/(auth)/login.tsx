@@ -22,6 +22,7 @@ export default function LoginScreen() {
   const setSession = useAuthStore((state) => state.setSession);
   const login = useResidentLogin();
   const driverLoginQuery = useDriverLogin();
+  const [societyId, setSocietyId] = useState("");
   const [flatNumber, setFlatNumber] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -40,6 +41,7 @@ export default function LoginScreen() {
         router.replace("/(driver)");
       } else {
         const session = await login.mutateAsync({
+          societyId: societyId.trim() || undefined,
           flatNumber: flatNumber.trim().toUpperCase(),
           password,
         });
@@ -80,6 +82,16 @@ export default function LoginScreen() {
             returnKeyType="next"
             value={flatNumber}
           />
+          {!isDriver && (
+            <TextField
+              autoCapitalize="none"
+              autoCorrect={false}
+              label="Society ID (if required)"
+              onChangeText={setSocietyId}
+              placeholder="Enter society ID"
+              value={societyId}
+            />
+          )}
           <TextField
             label="Password"
             onChangeText={setPassword}
@@ -112,6 +124,7 @@ export default function LoginScreen() {
             variant="secondary"
             onPress={() => {
               setIsDriver(!isDriver);
+              setSocietyId("");
               setFlatNumber("");
               setPassword("");
               setMessage(null);

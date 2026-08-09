@@ -6,7 +6,10 @@ import {
   bookingResponse,
   residentFlatId,
 } from "@/src/modules/bookings/service";
-import { getIsoWeek } from "@/src/lib/date";
+import {
+  currentQuotaPeriods,
+  ensureWeeklyQuotaHorizon,
+} from "@/src/modules/quotas/service";
 
 function assertResident(user: AuthUser) {
   if (user.role !== UserRole.RESIDENT || !user.flatId) {
@@ -82,60 +85,33 @@ export async function getDashboard(user: AuthUser) {
 
 export async function getCurrentQuota(user: AuthUser) {
   const flatId = residentFlatId(user);
-  const year = await currentQuotaYear(user.societyId);
-  const week = await currentQuotaWeek(user.societyId);
-
-  const flat = await prisma.flat.findUnique({
-    where: { id: flatId },
-    include: {
-      quotas: {
-        where: {
-          year,
-          weekNumber: week,
-        },
+  const [current] = await ensureWeeklyQuotaHorizon(flatId, user.societyId);
+  const quota = await prisma.flatQuota.findUnique({
+    where: {
+      flatId_year_weekNumber: {
+        flatId,
+        year: current.year,
+        weekNumber: current.week,
       },
     },
   });
 
-  const quota = flat?.quotas[0];
-  if (quota) {
-    return {
-      ...quota,
-      remainingMinutes: quota.allocatedMinutes - quota.usedMinutes,
-    };
+  if (!quota) {
+    throw new AppError(500, "QUOTA_PROVISION_FAILED", "Weekly quota could not be provisioned");
   }
 
   return {
-    allocatedMinutes: 16 * 60,
-    usedMinutes: 0,
-    remainingMinutes: 16 * 60,
+    ...quota,
+    remainingMinutes: quota.allocatedMinutes - quota.usedMinutes,
   };
 }
 
 export async function currentQuotaYear(societyId: string) {
-  const society = await prisma.society.findUnique({
-    where: { id: societyId },
-    select: { timezone: true },
-  });
-
-  if (!society) {
-    throw new AppError(404, "NOT_FOUND", "Society not found");
-  }
-
-  return getIsoWeek(new Date()).year;
+  return (await currentQuotaPeriods(societyId))[0].year;
 }
 
 export async function currentQuotaWeek(societyId: string) {
-  const society = await prisma.society.findUnique({
-    where: { id: societyId },
-    select: { timezone: true },
-  });
-
-  if (!society) {
-    throw new AppError(404, "NOT_FOUND", "Society not found");
-  }
-
-  return getIsoWeek(new Date()).week;
+  return (await currentQuotaPeriods(societyId))[0].week;
 }
 
 export async function getNotifications(user: AuthUser) {

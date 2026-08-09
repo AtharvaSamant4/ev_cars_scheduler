@@ -14,6 +14,10 @@ import { AppError } from "@/src/lib/errors";
 import { paginated, pagination } from "@/src/lib/pagination";
 import { bookingResponse } from "@/src/modules/bookings/service";
 import { currentQuotaYear, currentQuotaWeek } from "@/src/modules/residents/service";
+import {
+  currentQuotaPeriods,
+  WEEKLY_QUOTA_MINUTES,
+} from "@/src/modules/quotas/service";
 
 export async function adminDashboard(user: AuthUser) {
   const now = new Date();
@@ -226,8 +230,15 @@ export async function createFlat(
     weekNumber?: number;
   },
 ) {
-  const year = input.year ?? (await currentQuotaYear(user.societyId));
-  const weekNumber = input.weekNumber ?? (await currentQuotaWeek(user.societyId));
+  const periods = await currentQuotaPeriods(user.societyId);
+  const currentPeriod = {
+    year: input.year ?? periods[0].year,
+    week: input.weekNumber ?? periods[0].week,
+  };
+  const quotaPeriods = [...new Map([currentPeriod, ...periods].map((period) => [
+    `${period.year}-${period.week}`,
+    period,
+  ])).values()];
 
   return prisma.$transaction(async (tx) => {
     const flat = await tx.flat.create({
@@ -236,12 +247,24 @@ export async function createFlat(
         number: input.number.toUpperCase(),
       },
     });
-    const quota = await tx.flatQuota.create({
-      data: {
+    await tx.flatQuota.createMany({
+      data: quotaPeriods.map((period, index) => ({
         flatId: flat.id,
-        year,
-        weekNumber,
-        allocatedMinutes: input.allocatedMinutes,
+        year: period.year,
+        weekNumber: period.week,
+        allocatedMinutes: index === 0
+          ? input.allocatedMinutes
+          : WEEKLY_QUOTA_MINUTES,
+      })),
+      skipDuplicates: true,
+    });
+    const quota = await tx.flatQuota.findUniqueOrThrow({
+      where: {
+        flatId_year_weekNumber: {
+          flatId: flat.id,
+          year: currentPeriod.year,
+          weekNumber: currentPeriod.week,
+        },
       },
     });
 

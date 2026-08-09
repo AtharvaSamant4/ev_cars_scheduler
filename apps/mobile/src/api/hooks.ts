@@ -25,7 +25,7 @@ export const queryKeys = {
 
 export function useResidentLogin() {
   return useMutation({
-    mutationFn: (input: { flatNumber: string; password?: string }) =>
+    mutationFn: (input: { societyId?: string; flatNumber: string; password?: string }) =>
       apiRequest<ResidentSession>("/auth/resident/login", {
         method: "POST",
         body: JSON.stringify(input),

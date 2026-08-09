@@ -7,5 +7,5 @@ export const runtime = "nodejs";
 
 export const POST = apiRoute(async (request) => {
   const input = await parseBody(request, residentLoginSchema);
-  return ok(await loginResident(input.flatNumber, input.password));
+  return ok(await loginResident(input.flatNumber, input.password, input.societyId));
 });

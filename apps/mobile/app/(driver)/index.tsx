@@ -81,7 +81,11 @@ export default function DriverDashboardScreen() {
               label="Report Issue (Breakdown)"
               variant="danger"
               loading={reportIssueMutation.isPending}
-              disabled={reportIssueMutation.isPending || data.vehicle.status === "MAINTENANCE"}
+              disabled={
+                reportIssueMutation.isPending ||
+                data.vehicle.status === "MAINTENANCE" ||
+                data.vehicle.status === "BREAKDOWN"
+              }
               onPress={async () => {
                 try {
                   await reportIssueMutation.mutateAsync();

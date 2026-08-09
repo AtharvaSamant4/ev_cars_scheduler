@@ -12,6 +12,7 @@ import type { AuthUser } from "@/src/lib/auth";
 import { getIsoWeek } from "@/src/lib/date";
 import { AppError } from "@/src/lib/errors";
 import { paginated, pagination } from "@/src/lib/pagination";
+import { ensureWeeklyQuotaHorizon } from "@/src/modules/quotas/service";
 
 type NormalizedRange = {
   startTime: Date;
@@ -43,6 +44,43 @@ export function residentFlatId(user: AuthUser) {
   }
 
   return user.flatId;
+}
+
+async function assignedDriverProfile(user: AuthUser) {
+  const account = await prisma.user.findFirst({
+    where: {
+      id: user.id,
+      societyId: user.societyId,
+      role: UserRole.DRIVER,
+      isActive: true,
+    },
+    select: { phone: true },
+  });
+
+  if (!account?.phone) {
+    throw new AppError(404, "NOT_FOUND", "Driver account phone number is missing");
+  }
+
+  const driver = await prisma.driver.findFirst({
+    where: {
+      societyId: user.societyId,
+      phoneNumber: account.phone,
+      isActive: true,
+    },
+    select: { id: true },
+  });
+
+  if (!driver) {
+    throw new AppError(404, "NOT_FOUND", "Active driver profile not found");
+  }
+
+  return driver;
+}
+
+function assertAssignedDriver(bookingDriverId: string | null, driverId: string) {
+  if (bookingDriverId !== driverId) {
+    throw new AppError(403, "FORBIDDEN", "This booking is assigned to another driver");
+  }
 }
 
 async function societyTimezone(societyId: string) {
@@ -246,6 +284,7 @@ export async function checkAvailability(
   const flatId = residentFlatId(user);
   const timezone = await societyTimezone(user.societyId);
   const range = normalizeBookingRange(startValue, endValue, timezone, user.role);
+  await ensureWeeklyQuotaHorizon(flatId, user.societyId, range.startTime);
 
   const [quota, availableVehicles] = await Promise.all([
     prisma.flatQuota.findUnique({
@@ -312,6 +351,7 @@ export async function createBooking(
   const flatId = residentFlatId(user);
   const timezone = await societyTimezone(user.societyId);
   const range = normalizeBookingRange(startValue, endValue, timezone, user.role);
+  await ensureWeeklyQuotaHorizon(flatId, user.societyId, range.startTime);
 
   return serializable(() =>
     prisma.$transaction(
@@ -560,13 +600,14 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
         }
 
         if (
-          booking.status !== BookingStatus.BOOKED ||
+          (booking.status !== BookingStatus.BOOKED &&
+            booking.status !== BookingStatus.AT_RISK) ||
           booking.startTime <= new Date()
         ) {
           throw new AppError(
             409,
             "BOOKING_NOT_CANCELLABLE",
-            "Only future booked reservations can be cancelled",
+            "Only future booked or at-risk reservations can be cancelled",
           );
         }
 
@@ -684,6 +725,10 @@ export async function reassignBooking(
   reserveVehicleId: string,
   reason: ReassignReason,
 ) {
+  if (user.role !== UserRole.ADMIN) {
+    throw new AppError(403, "FORBIDDEN", "Only admins can reassign bookings");
+  }
+
   return serializable(() =>
     prisma.$transaction(
       async (tx) => {
@@ -837,18 +882,7 @@ export async function driverArrive(user: AuthUser, bookingId: string) {
     throw new AppError(403, "FORBIDDEN", "Only drivers can trigger arrival");
   }
 
-  const fullUser = await prisma.user.findUnique({ where: { id: user.id } });
-  if (!fullUser || !fullUser.phone) {
-    throw new AppError(404, "NOT_FOUND", "User profile not found");
-  }
-
-  const driver = await prisma.driver.findFirst({
-    where: { phoneNumber: fullUser.phone },
-  });
-
-  if (!driver) {
-    throw new AppError(404, "NOT_FOUND", "Driver profile not found");
-  }
+  const driver = await assignedDriverProfile(user);
 
   return prisma.$transaction(async (tx) => {
     const booking = await tx.booking.findUnique({
@@ -859,9 +893,7 @@ export async function driverArrive(user: AuthUser, bookingId: string) {
       throw new AppError(404, "NOT_FOUND", "Booking not found");
     }
 
-    if (booking.vehicleId !== driver.vehicleId) {
-      throw new AppError(403, "FORBIDDEN", "You are not assigned to this vehicle");
-    }
+    assertAssignedDriver(booking.driverId, driver.id);
 
     if (booking.status !== "DRIVER_ASSIGNED" && booking.status !== "BOOKED") {
       throw new AppError(400, "INVALID_STATUS", "Booking is not ready for arrival");
@@ -883,6 +915,7 @@ export async function driverArrive(user: AuthUser, bookingId: string) {
       },
       include: {
         vehicle: true,
+        reassignedVehicle: true,
         driver: true,
         user: true,
         flat: true,
@@ -898,20 +931,9 @@ export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) 
     throw new AppError(403, "FORBIDDEN", "Only drivers can verify OTP");
   }
 
-  const fullUser = await prisma.user.findUnique({ where: { id: user.id } });
-  if (!fullUser || !fullUser.phone) {
-    throw new AppError(404, "NOT_FOUND", "User profile not found");
-  }
+  const driver = await assignedDriverProfile(user);
 
-  const driver = await prisma.driver.findFirst({
-    where: { phoneNumber: fullUser.phone },
-  });
-
-  if (!driver) {
-    throw new AppError(404, "NOT_FOUND", "Driver profile not found");
-  }
-
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const booking = await tx.booking.findUnique({
       where: { id: bookingId, societyId: user.societyId },
     });
@@ -920,9 +942,7 @@ export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) 
       throw new AppError(404, "NOT_FOUND", "Booking not found");
     }
 
-    if (booking.vehicleId !== driver.vehicleId) {
-      throw new AppError(403, "FORBIDDEN", "You are not assigned to this vehicle");
-    }
+    assertAssignedDriver(booking.driverId, driver.id);
 
     if (booking.status !== "OTP_PENDING") {
       throw new AppError(400, "INVALID_STATUS", "Booking is not pending OTP verification");
@@ -943,7 +963,7 @@ export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) 
         where: { id: booking.id },
         data: { otpAttempts: { increment: 1 } },
       });
-      throw new AppError(400, "INVALID_OTP", "Invalid OTP");
+      return { invalidOtp: true as const };
     }
 
     const updated = await tx.booking.update({
@@ -956,14 +976,21 @@ export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) 
       },
       include: {
         vehicle: true,
+        reassignedVehicle: true,
         driver: true,
         user: true,
         flat: true,
       },
     });
 
-    return bookingResponse(updated);
+    return { invalidOtp: false as const, booking: bookingResponse(updated) };
   });
+
+  if (result.invalidOtp) {
+    throw new AppError(400, "INVALID_OTP", "Invalid OTP");
+  }
+
+  return result.booking;
 }
 
 export async function completeTrip(user: AuthUser, bookingId: string, actualEndTimeValue?: string) {
@@ -971,42 +998,48 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
     throw new AppError(403, "FORBIDDEN", "Only drivers or admins can complete trips");
   }
 
-  let driverVehicleId: string | null = null;
+  let driverProfileId: string | null = null;
   if (user.role === "DRIVER") {
-    const fullUser = await prisma.user.findUnique({ where: { id: user.id } });
-    if (!fullUser || !fullUser.phone) {
-      throw new AppError(404, "NOT_FOUND", "User profile not found");
-    }
-
-    const driver = await prisma.driver.findFirst({
-      where: { phoneNumber: fullUser.phone },
-    });
-
-    if (!driver) {
-      throw new AppError(404, "NOT_FOUND", "Driver profile not found");
-    }
-    driverVehicleId = driver.vehicleId;
+    driverProfileId = (await assignedDriverProfile(user)).id;
   }
 
   return serializable(() => prisma.$transaction(async (tx) => {
     const booking = await tx.booking.findUnique({
       where: { id: bookingId, societyId: user.societyId },
-      include: { vehicle: true },
+      include: { vehicle: true, reassignedVehicle: true },
     });
 
     if (!booking) {
       throw new AppError(404, "NOT_FOUND", "Booking not found");
     }
 
-    if (user.role === "DRIVER" && booking.vehicleId !== driverVehicleId) {
-      throw new AppError(403, "FORBIDDEN", "You are not assigned to this vehicle");
+    if (user.role === "DRIVER") {
+      assertAssignedDriver(booking.driverId, driverProfileId!);
     }
 
-    if (booking.status === "COMPLETED" || booking.status === "CANCELLED") {
-      throw new AppError(400, "INVALID_STATUS", "Booking is already completed or cancelled");
+    if (
+      booking.status !== BookingStatus.IN_PROGRESS ||
+      !booking.otpVerified ||
+      !booking.actualRideStartTime
+    ) {
+      throw new AppError(
+        409,
+        "RIDE_NOT_STARTED",
+        "Only a verified ride in progress can be completed",
+      );
     }
 
     const actualEndTime = actualEndTimeValue ? new Date(actualEndTimeValue) : new Date();
+    if (
+      Number.isNaN(actualEndTime.getTime()) ||
+      actualEndTime < booking.actualRideStartTime
+    ) {
+      throw new AppError(
+        400,
+        "INVALID_END_TIME",
+        "Actual end time must be after the ride start time",
+      );
+    }
 
     const delayMs = actualEndTime.getTime() - booking.endTime.getTime();
     const delayMinutes = Math.max(0, delayMs / 60000);
@@ -1016,7 +1049,7 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
       where: { societyId_code: { societyId: user.societyId, code: "LATE_RETURN_PER_HOUR" } }
     });
 
-    if (delayMinutes > 0 && penaltyRule) {
+    if (delayMinutes > 0 && penaltyRule?.isActive) {
       const delayHours = Math.ceil(delayMinutes / 60);
       penaltyAmount = delayHours * penaltyRule.amount;
     }
@@ -1073,6 +1106,7 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
       },
       include: {
         vehicle: true,
+        reassignedVehicle: true,
         driver: true,
         user: true,
         flat: true,

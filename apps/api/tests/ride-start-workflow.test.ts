@@ -3,6 +3,7 @@ import { prisma, UserRole, BookingStatus, VehicleStatus } from "@society-ev/db";
 import type { Driver, Society, Vehicle } from "@society-ev/db";
 import type { AuthUser } from "@/src/lib/auth";
 import { assignDriver, driverArrive, verifyOtp } from "@/src/modules/bookings/service";
+import { getIsoWeek } from "@/src/lib/date";
 
 describe("Ride Start OTP Workflow", () => {
   let admin: AuthUser;
@@ -70,6 +71,10 @@ describe("Ride Start OTP Workflow", () => {
         status: VehicleStatus.AVAILABLE,
       },
     });
+    driverProfile = await prisma.driver.update({
+      where: { id: driverProfile.id },
+      data: { vehicleId: vehicle.id },
+    });
 
     const now = new Date();
     const start = new Date(now.getTime() + 10000);
@@ -81,8 +86,8 @@ describe("Ride Start OTP Workflow", () => {
         vehicleId: vehicle.id,
         flatId: flat.id,
         userId: resident.id,
-        quotaYear: start.getFullYear(),
-        quotaWeek: 1,
+        quotaYear: getIsoWeek(start).year,
+        quotaWeek: getIsoWeek(start).week,
         startTime: start,
         endTime: end,
         durationMinutes: 60,

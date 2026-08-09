@@ -7,6 +7,7 @@ const optionalBooleanQuery = z
   .optional();
 
 export const residentLoginSchema = z.object({
+  societyId: z.string().uuid().optional(),
   flatNumber: z.string().trim().min(1).max(30),
   password,
 });
@@ -66,7 +67,7 @@ export const vehicleUpdateSchema = vehicleCreateSchema.partial().refine(
 
 export const flatCreateSchema = z.object({
   number: z.string().trim().min(1).max(30),
-  allocatedMinutes: z.number().int().min(0).default(52_560),
+  allocatedMinutes: z.number().int().min(0).default(960),
   year: z.number().int().min(2020).max(2100).optional(),
 });
 

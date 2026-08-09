@@ -1,4 +1,4 @@
-import { ReassignReason } from "@society-ev/db";
+import { ReassignReason, UserRole } from "@society-ev/db";
 import { z } from "zod";
 
 import { requireAuth } from "@/src/lib/auth";
@@ -14,7 +14,7 @@ const reassignSchema = z.object({
 });
 
 export const POST = apiRoute(async (req, { params }) => {
-  const user = await requireAuth(req);
+  const user = await requireAuth(req, UserRole.ADMIN);
   const body = reassignSchema.parse(await req.json());
   const { id } = await params;
 

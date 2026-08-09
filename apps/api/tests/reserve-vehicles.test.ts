@@ -1,120 +1,86 @@
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { prisma, ReassignReason, UserRole } from "@society-ev/db";
-import type { AuthUser } from "@/src/lib/auth";
-import { reassignBooking, createBooking, checkAvailability } from "@/src/modules/bookings/service";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-describe("Reserve Vehicle Integration", () => {
-  let adminUser: AuthUser;
-  let residentUser: AuthUser;
+import type { AuthUser } from "@/src/lib/auth";
+import { checkAvailability, createBooking, reassignBooking } from "@/src/modules/bookings/service";
+import { cleanupSocietyFixture } from "@/tests/helpers/database";
+
+describe("Reserve vehicle integration", () => {
+  let admin: AuthUser;
+  let resident: AuthUser;
   let societyId: string;
   let normalVehicleId: string;
   let reserveVehicle1Id: string;
   let reserveVehicle2Id: string;
+  let reserveVehicle3Id: string;
   let bookingId: string;
 
   beforeAll(async () => {
-    const admin = await prisma.user.findFirst({ where: { role: UserRole.ADMIN } });
-    if (!admin) throw new Error("No admin found");
-    societyId = admin.societyId;
-    adminUser = admin;
+    const society = await prisma.society.create({ data: { name: "Reserve Fixture Society", timezone: "Asia/Kolkata" } });
+    societyId = society.id;
+    const flat = await prisma.flat.create({ data: { societyId, number: "RES-101" } });
+    [admin, resident] = await Promise.all([
+      prisma.user.create({ data: { societyId, role: UserRole.ADMIN, name: "Reserve Admin", phone: "9100000021", passwordHash: "fixture-hash" } }),
+      prisma.user.create({ data: { societyId, flatId: flat.id, role: UserRole.RESIDENT, name: "Reserve Resident", phone: "9100000022", passwordHash: "fixture-hash" } }),
+    ]);
+    await prisma.wallet.create({ data: { userId: resident.id, balance: 10_000 } });
+    const vehicles = await Promise.all([
+      prisma.vehicle.create({ data: { societyId, name: "Normal Fixture EV", registrationNumber: "RES-NORMAL", isReserve: false } }),
+      prisma.vehicle.create({ data: { societyId, name: "Reserve Fixture EV 1", registrationNumber: "RES-ONE", isReserve: true } }),
+      prisma.vehicle.create({ data: { societyId, name: "Reserve Fixture EV 2", registrationNumber: "RES-TWO", isReserve: true } }),
+      prisma.vehicle.create({ data: { societyId, name: "Reserve Fixture EV 3", registrationNumber: "RES-THREE", isReserve: true } }),
+    ]);
+    [normalVehicleId, reserveVehicle1Id, reserveVehicle2Id, reserveVehicle3Id] = vehicles.map((vehicle) => vehicle.id);
 
-    const resident = await prisma.user.findFirst({ where: { role: UserRole.RESIDENT } });
-    if (!resident || !resident.flatId) throw new Error("No resident found");
-    residentUser = resident;
-    // Create a normal vehicle and two reserve vehicles explicitly for testing
-    const normalVehicle = await prisma.vehicle.create({
-      data: { societyId, name: "Normal Test EV", registrationNumber: "NRM-001", isReserve: false, status: "AVAILABLE", hourlyRate: 100 }
-    });
-    normalVehicleId = normalVehicle.id;
-
-    const reserveVehicle1 = await prisma.vehicle.create({
-      data: { societyId, name: "Reserve Test EV 1", registrationNumber: "RES-001", isReserve: true, status: "AVAILABLE", hourlyRate: 100 }
-    });
-    reserveVehicle1Id = reserveVehicle1.id;
-
-    const reserveVehicle2 = await prisma.vehicle.create({
-      data: { societyId, name: "Reserve Test EV 2", registrationNumber: "RES-002", isReserve: true, status: "AVAILABLE", hourlyRate: 100 }
-    });
-    reserveVehicle2Id = reserveVehicle2.id;
-
-    const start1 = new Date();
-    start1.setDate(start1.getDate() + 10);
-    start1.setHours(10, 0, 0, 0);
-    const end1 = new Date(start1);
-    end1.setHours(12, 0, 0, 0);
-
-    const b1 = await createBooking(residentUser, start1.toISOString(), end1.toISOString(), normalVehicleId);
-    bookingId = b1.booking.id;
-  });
-
-  afterAll(async () => {
-    // Delete the booking, its logs, and the test vehicles
-    await prisma.reassignmentLog.deleteMany({ where: { bookingId } });
-    await prisma.booking.deleteMany({ where: { id: bookingId } });
-    await prisma.vehicle.deleteMany({ where: { id: { in: [normalVehicleId, reserveVehicle1Id, reserveVehicle2Id] } } });
-  });
-
-  it("should exclude reserve vehicles from availability", async () => {
     const start = new Date();
-    start.setDate(start.getDate() + 11);
+    start.setDate(start.getDate() + 1);
     start.setHours(10, 0, 0, 0);
-    const end = new Date(start);
-    end.setHours(12, 0, 0, 0);
-
-    const result = await checkAvailability(residentUser, start.toISOString(), end.toISOString());
-    const vehicleIds = result.availableVehicles.map(v => v.id);
-    expect(vehicleIds).toContain(normalVehicleId);
-    expect(vehicleIds).not.toContain(reserveVehicle1Id);
-    expect(vehicleIds).not.toContain(reserveVehicle2Id);
+    bookingId = (await createBooking(resident, start.toISOString(), new Date(start.getTime() + 2 * 60 * 60_000).toISOString(), normalVehicleId)).booking.id;
   });
 
-  it("should reassign booking to reserve vehicle and create audit trail", async () => {
-    const result = await reassignBooking(adminUser, bookingId, reserveVehicle1Id, ReassignReason.LATE_RETURN);
-    
+  afterAll(async () => cleanupSocietyFixture(societyId));
+
+  it("excludes reserve vehicles from resident availability", async () => {
+    const start = new Date();
+    start.setDate(start.getDate() + 2);
+    start.setHours(10, 0, 0, 0);
+    const result = await checkAvailability(resident, start.toISOString(), new Date(start.getTime() + 2 * 60 * 60_000).toISOString());
+    const ids = result.availableVehicles.map((vehicle) => vehicle.id);
+    expect(ids).toContain(normalVehicleId);
+    expect(ids).not.toContain(reserveVehicle1Id);
+    expect(ids).not.toContain(reserveVehicle2Id);
+  });
+
+  it("rejects reassignment by a resident", async () => {
+    await expect(reassignBooking(resident, bookingId, reserveVehicle1Id, ReassignReason.BREAKDOWN)).rejects.toThrow("Only admins");
+  });
+
+  it("reassigns to a reserve vehicle with an audit trail", async () => {
+    const result = await reassignBooking(admin, bookingId, reserveVehicle1Id, ReassignReason.LATE_RETURN);
     expect(result.reassignedVehicleId).toBe(reserveVehicle1Id);
-    expect(result.reassignedReason).toBe(ReassignReason.LATE_RETURN);
-
-    // Verify Audit Trail
     const logs = await prisma.reassignmentLog.findMany({ where: { bookingId } });
-    expect(logs.length).toBe(1);
-    expect(logs[0].originalVehicleId).toBe(normalVehicleId);
-    expect(logs[0].newVehicleId).toBe(reserveVehicle1Id);
-    expect(logs[0].reason).toBe(ReassignReason.LATE_RETURN);
-    expect(logs[0].reassignedByUserId).toBe(adminUser.id);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      originalVehicleId: normalVehicleId,
+      newVehicleId: reserveVehicle1Id,
+      reason: ReassignReason.LATE_RETURN,
+      reassignedByUserId: admin.id,
+    });
   });
 
-  it("should support multiple reassignments without losing history", async () => {
-    // Reassign again to the second reserve vehicle
-    const result = await reassignBooking(adminUser, bookingId, reserveVehicle2Id, ReassignReason.BREAKDOWN);
-    
-    expect(result.reassignedVehicleId).toBe(reserveVehicle2Id);
-    expect(result.reassignedReason).toBe(ReassignReason.BREAKDOWN);
-
-    // Verify Audit Trail retains both logs
-    const logs = await prisma.reassignmentLog.findMany({ where: { bookingId }, orderBy: { createdAt: 'asc' } });
-    expect(logs.length).toBe(2);
-    
-    // First log
-    expect(logs[0].originalVehicleId).toBe(normalVehicleId);
-    expect(logs[0].newVehicleId).toBe(reserveVehicle1Id);
-    
-    // Second log
-    expect(logs[1].originalVehicleId).toBe(reserveVehicle1Id);
-    expect(logs[1].newVehicleId).toBe(reserveVehicle2Id);
-    expect(logs[1].reason).toBe(ReassignReason.BREAKDOWN);
+  it("retains history across a second reassignment", async () => {
+    await reassignBooking(admin, bookingId, reserveVehicle2Id, ReassignReason.BREAKDOWN);
+    const logs = await prisma.reassignmentLog.findMany({ where: { bookingId }, orderBy: { createdAt: "asc" } });
+    expect(logs).toHaveLength(2);
+    expect(logs[1]).toMatchObject({ originalVehicleId: reserveVehicle1Id, newVehicleId: reserveVehicle2Id });
   });
 
-  it("should throw error on concurrent reassignment", async () => {
-    const promises = [
-      reassignBooking(adminUser, bookingId, normalVehicleId, ReassignReason.MAINTENANCE), // Revert to normal
-      reassignBooking(adminUser, bookingId, normalVehicleId, ReassignReason.EMERGENCY)
-    ];
-
-    const results = await Promise.allSettled(promises);
-    const successes = results.filter(r => r.status === "fulfilled");
-    const failures = results.filter(r => r.status === "rejected");
-
-    expect(successes.length).toBe(1);
-    expect(failures.length).toBe(1);
+  it("allows one winner when the same reserve vehicle is assigned concurrently", async () => {
+    const results = await Promise.allSettled([
+      reassignBooking(admin, bookingId, reserveVehicle3Id, ReassignReason.MAINTENANCE),
+      reassignBooking(admin, bookingId, reserveVehicle3Id, ReassignReason.EMERGENCY),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
   });
 });

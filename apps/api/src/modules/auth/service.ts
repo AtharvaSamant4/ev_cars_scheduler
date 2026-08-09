@@ -5,13 +5,44 @@ import { prisma, UserRole } from "@society-ev/db";
 import { issueToken } from "@/src/lib/auth";
 import { AppError } from "@/src/lib/errors";
 
-export async function loginResident(flatNumber: string, password: string) {
+export async function loginResident(
+  flatNumber: string,
+  password: string,
+  requestedSocietyId?: string,
+) {
+  const normalizedFlatNumber = flatNumber.trim().toUpperCase();
+  let societyId = requestedSocietyId;
+
+  if (!societyId) {
+    const matches = await prisma.user.findMany({
+      where: {
+        role: UserRole.RESIDENT,
+        isActive: true,
+        flat: { number: normalizedFlatNumber, isActive: true },
+      },
+      select: { societyId: true },
+      distinct: ["societyId"],
+      take: 2,
+    });
+
+    if (matches.length > 1) {
+      throw new AppError(
+        400,
+        "SOCIETY_REQUIRED",
+        "Society ID is required for this flat number",
+      );
+    }
+
+    societyId = matches[0]?.societyId;
+  }
+
   const user = await prisma.user.findFirst({
     where: {
+      societyId,
       role: UserRole.RESIDENT,
       isActive: true,
       flat: {
-        number: flatNumber.trim().toUpperCase(),
+        number: normalizedFlatNumber,
         isActive: true,
       },
     },

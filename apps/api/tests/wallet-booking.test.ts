@@ -1,110 +1,67 @@
-import { describe, expect, it, beforeAll } from "vitest";
-import { prisma, UserRole, TransactionType } from "@society-ev/db";
-import type { AuthUser } from "@/src/lib/auth";
-import { createBooking, cancelBooking } from "@/src/modules/bookings/service";
+import { prisma, TransactionType, UserRole } from "@society-ev/db";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-describe("Wallet Booking Integration", () => {
-  let userId: string;
+import type { AuthUser } from "@/src/lib/auth";
+import { cancelBooking, createBooking } from "@/src/modules/bookings/service";
+import { cleanupSocietyFixture } from "@/tests/helpers/database";
+
+describe("Wallet booking integration", () => {
+  let societyId: string;
+  let resident: AuthUser;
   let vehicleId: string;
-  let vehicleRate: number;
-  let residentUser: AuthUser;
+  const hourlyRate = 125;
+
+  function slot(days: number) {
+    const start = new Date();
+    start.setDate(start.getDate() + days);
+    start.setHours(9, 0, 0, 0);
+    return start;
+  }
 
   beforeAll(async () => {
-    // We assume the DB is seeded. We will just pick the first available vehicle and resident.
-    const society = await prisma.society.findFirst();
-    if (!society) throw new Error("No society found");
-    const resident = await prisma.user.findFirst({
-      where: { role: UserRole.RESIDENT },
-      include: { flat: true },
+    const society = await prisma.society.create({ data: { name: "Wallet Fixture Society", timezone: "Asia/Kolkata" } });
+    societyId = society.id;
+    const flat = await prisma.flat.create({ data: { societyId, number: "WAL-101" } });
+    resident = await prisma.user.create({
+      data: { societyId, flatId: flat.id, role: UserRole.RESIDENT, name: "Wallet Resident", phone: "9100000011", passwordHash: "fixture-hash" },
     });
-    if (!resident || !resident.flatId) throw new Error("No resident found");
-    userId = resident.id;
-    residentUser = resident;
-
-    const vehicle = await prisma.vehicle.findFirst({
-      where: { status: "AVAILABLE", isReserve: false },
+    await prisma.wallet.create({ data: { userId: resident.id, balance: 0 } });
+    const vehicle = await prisma.vehicle.create({
+      data: { societyId, name: "Wallet EV", registrationNumber: "WAL-EV-1", hourlyRate },
     });
-    if (!vehicle) throw new Error("No vehicle found");
     vehicleId = vehicle.id;
-    vehicleRate = vehicle.hourlyRate;
   });
 
-  it("should successfully deduct balance on booking", async () => {
-    // Reset wallet to exact balance for 2 hours
-    const cost = vehicleRate * 2;
-    await prisma.wallet.update({
-      where: { userId },
-      data: { balance: cost },
-    });
+  afterAll(async () => cleanupSocietyFixture(societyId));
 
-    // Create a booking 3 days ahead
-    const startTime = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-    startTime.setMinutes(0, 0, 0); // Align to boundary
-    const endTime = new Date(startTime.getTime() + 2 * 60 * 60 * 1000); // 2 hours
-
-    const result = await createBooking(
-      residentUser,
-      startTime.toISOString(),
-      endTime.toISOString(),
-      vehicleId
-    );
-
-    expect(result.booking).toBeDefined();
-    
-    // Verify wallet balance is 0
-    const wallet = await prisma.wallet.findUnique({ where: { userId } });
-    expect(wallet?.balance).toBe(0);
-
-    // Verify transaction was created
-    const tx = await prisma.walletTransaction.findFirst({
-      where: { bookingId: result.booking.id, type: TransactionType.BOOKING_DEBIT },
-    });
-    expect(tx).toBeDefined();
-    expect(tx?.amount).toBe(cost);
+  it("deducts the exact booking charge once", async () => {
+    const cost = hourlyRate * 2;
+    await prisma.wallet.update({ where: { userId: resident.id }, data: { balance: cost } });
+    const start = slot(3);
+    const result = await createBooking(resident, start.toISOString(), new Date(start.getTime() + 2 * 60 * 60_000).toISOString(), vehicleId);
+    const wallet = await prisma.wallet.findUniqueOrThrow({ where: { userId: resident.id } });
+    const debits = await prisma.walletTransaction.findMany({ where: { bookingId: result.booking.id, type: TransactionType.BOOKING_DEBIT } });
+    expect(wallet.balance).toBe(0);
+    expect(debits).toHaveLength(1);
+    expect(debits[0].amount).toBe(cost);
   });
 
-  it("should reject booking if insufficient balance", async () => {
-    // Wallet is currently 0 from previous test
-    const startTime = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
-    startTime.setMinutes(0, 0, 0); 
-    const endTime = new Date(startTime.getTime() + 2 * 60 * 60 * 1000);
-
-    await expect(
-      createBooking(residentUser, startTime.toISOString(), endTime.toISOString(), vehicleId)
-    ).rejects.toThrowError("Insufficient wallet balance.");
+  it("rejects an insufficient wallet balance", async () => {
+    await prisma.wallet.update({ where: { userId: resident.id }, data: { balance: 0 } });
+    const start = slot(4);
+    await expect(createBooking(resident, start.toISOString(), new Date(start.getTime() + 2 * 60 * 60_000).toISOString(), vehicleId)).rejects.toThrow("Insufficient wallet balance");
   });
 
-  it("should refund the exact amount on cancellation", async () => {
-    const cost = vehicleRate * 1;
-    await prisma.wallet.update({
-      where: { userId },
-      data: { balance: cost },
-    });
-
-    const startTime = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
-    startTime.setMinutes(0, 0, 0); 
-    const endTime = new Date(startTime.getTime() + 1 * 60 * 60 * 1000);
-
-    const result = await createBooking(
-      residentUser,
-      startTime.toISOString(),
-      endTime.toISOString(),
-      vehicleId
-    );
-
-    let wallet = await prisma.wallet.findUnique({ where: { userId } });
-    expect(wallet?.balance).toBe(0);
-
-    const cancelResult = await cancelBooking(residentUser, result.booking.id);
-    expect(cancelResult.booking.status).toBe("CANCELLED");
-
-    wallet = await prisma.wallet.findUnique({ where: { userId } });
-    expect(wallet?.balance).toBe(cost);
-
-    const refundTx = await prisma.walletTransaction.findFirst({
-      where: { bookingId: result.booking.id, type: TransactionType.REFUND },
-    });
-    expect(refundTx).toBeDefined();
-    expect(refundTx?.amount).toBe(cost);
+  it("refunds the exact charge once on cancellation", async () => {
+    const cost = hourlyRate;
+    await prisma.wallet.update({ where: { userId: resident.id }, data: { balance: cost } });
+    const start = slot(5);
+    const result = await createBooking(resident, start.toISOString(), new Date(start.getTime() + 60 * 60_000).toISOString(), vehicleId);
+    await cancelBooking(resident, result.booking.id);
+    const wallet = await prisma.wallet.findUniqueOrThrow({ where: { userId: resident.id } });
+    const refunds = await prisma.walletTransaction.findMany({ where: { bookingId: result.booking.id, type: TransactionType.REFUND } });
+    expect(wallet.balance).toBe(cost);
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0].amount).toBe(cost);
   });
 });

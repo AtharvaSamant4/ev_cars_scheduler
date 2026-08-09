@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TransactionType } from "@society-ev/db";
+import { TransactionType, UserRole } from "@society-ev/db";
 import { requireAuth } from "@/src/lib/auth";
 import { apiRoute, ok } from "@/src/lib/http";
 import { adjustWalletBalance } from "@/src/modules/wallet/service";
@@ -14,7 +14,7 @@ const adjustSchema = z.object({
 });
 
 export const POST = apiRoute(async (req, { params }) => {
-  const user = await requireAuth(req);
+  const user = await requireAuth(req, UserRole.ADMIN);
   const body = adjustSchema.parse(await req.json());
   const { id } = await params;
   

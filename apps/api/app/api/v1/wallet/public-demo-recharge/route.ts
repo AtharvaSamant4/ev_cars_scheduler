@@ -1,7 +1,31 @@
 import { NextResponse } from "next/server";
 import { prisma, TransactionType } from "@society-ev/db";
 
+function isLocalDevelopmentDatabase() {
+  if (process.env.NODE_ENV !== "development" && process.env.NODE_ENV !== "test") {
+    return false;
+  }
+
+  try {
+    const databaseUrl = new URL(process.env.DATABASE_URL ?? "");
+    const databaseName = databaseUrl.pathname.replace(/^\//, "");
+    return (
+      (databaseUrl.hostname === "localhost" || databaseUrl.hostname === "127.0.0.1") &&
+      databaseName.startsWith("society_ev_recovery_")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(req: Request) {
+  if (!isLocalDevelopmentDatabase()) {
+    return NextResponse.json(
+      { error: { code: "NOT_FOUND", message: "Not found" } },
+      { status: 404 },
+    );
+  }
+
   try {
     const { amount, userId } = await req.json();
 

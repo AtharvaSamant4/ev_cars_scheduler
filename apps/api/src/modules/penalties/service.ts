@@ -19,6 +19,17 @@ export async function getCancellationPenaltyAmount(user: AuthUser) {
   return { amount: rule?.amount ?? 0 };
 }
 
+export async function listPenaltyRules(user: AuthUser) {
+  if (user.role !== "ADMIN") {
+    throw new AppError(403, "FORBIDDEN", "Only admins can view penalty rules");
+  }
+
+  return prisma.penaltyRule.findMany({
+    where: { societyId: user.societyId, isActive: true },
+    orderBy: [{ name: "asc" }, { code: "asc" }],
+  });
+}
+
 export async function updateCancellationPenaltyAmount(user: AuthUser, amount: number) {
   if (user.role !== "ADMIN") {
     throw new AppError(403, "FORBIDDEN", "Only admins can update penalty settings");
