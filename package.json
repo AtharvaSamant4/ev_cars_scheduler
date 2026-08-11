@@ -13,6 +13,7 @@
     "db:generate": "pnpm --filter @society-ev/db db:generate",
     "db:migrate": "pnpm --filter @society-ev/db db:migrate",
     "db:deploy": "pnpm --filter @society-ev/db db:deploy",
-    "db:seed": "pnpm --filter @society-ev/db db:seed"
+    "db:seed": "pnpm --filter @society-ev/db db:seed",
+    "db:demo:prepare": "pnpm --filter @society-ev/db db:demo:prepare"
   }
 }

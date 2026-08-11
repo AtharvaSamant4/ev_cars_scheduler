@@ -126,6 +126,19 @@ export async function driverLogin(input: {
     throw new AppError(401, "AUTH_INVALID", "Invalid phone number or password");
   }
 
+  const profile = await prisma.driver.findFirst({
+    where: {
+      societyId: user.societyId,
+      phoneNumber: user.phone!,
+      isActive: true,
+    },
+    select: { id: true },
+  });
+
+  if (!profile) {
+    throw new AppError(401, "AUTH_INVALID", "Invalid phone number or password");
+  }
+
   const token = await issueToken(user);
 
   return {

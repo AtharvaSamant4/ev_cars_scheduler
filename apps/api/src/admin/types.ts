@@ -2,10 +2,12 @@ export type ApiEnvelope<T> = { data: T };
 
 export type Paginated<T> = {
   items: T[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
 };
 
 export type AdminUser = {
@@ -60,6 +62,7 @@ export type Vehicle = {
   registrationNumber: string;
   status: VehicleStatus;
   isReserve: boolean;
+  hourlyRate: number;
   maintenanceReason?: string | null;
   expectedReturnDate?: string | null;
   createdAt: string;
@@ -86,6 +89,7 @@ export type Quota = {
   id: string;
   flatId: string;
   year: number;
+  weekNumber: number;
   allocatedMinutes: number;
   usedMinutes: number;
   createdAt: string;
@@ -145,6 +149,7 @@ export type AffectedBooking = {
   endTime: string;
   status: BookingStatus;
   vehicle: VehicleSummary;
+  reassignedVehicle?: VehicleSummary | null;
   user: {
     id: string;
     name: string;

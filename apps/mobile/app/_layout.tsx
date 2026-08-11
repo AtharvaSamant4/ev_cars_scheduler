@@ -21,6 +21,9 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(driver)" options={{ headerShown: false }} />
+        <Stack.Screen name="show-qr" options={{ headerShown: false }} />
+        <Stack.Screen name="scan-qr" options={{ headerShown: false }} />
+        <Stack.Screen name="qr-recharge" options={{ headerShown: false }} />
         <Stack.Screen
           name="booking/[id]"
           options={{ title: "Booking details" }}

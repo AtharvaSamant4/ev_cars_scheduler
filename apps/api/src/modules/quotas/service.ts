@@ -1,7 +1,7 @@
 import { prisma } from "@society-ev/db";
 import { toZonedTime } from "date-fns-tz";
 
-import { getIsoWeek } from "@/src/lib/date";
+import { addCalendarDaysInTimezone, getIsoWeek } from "@/src/lib/date";
 import { AppError } from "@/src/lib/errors";
 
 export const WEEKLY_QUOTA_MINUTES = 16 * 60;
@@ -30,7 +30,7 @@ export async function currentQuotaPeriods(
   now = new Date(),
 ) {
   const timezone = await societyTimezone(societyId);
-  const periods = [now, new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)]
+  const periods = [now, addCalendarDaysInTimezone(now, 7, timezone)]
     .map((date) => quotaPeriod(date, timezone));
 
   return [...new Map(periods.map((period) => [
@@ -46,7 +46,7 @@ export async function ensureWeeklyQuotaHorizon(
 ) {
   const timezone = await societyTimezone(societyId);
   const now = new Date();
-  const dates = [now, new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)];
+  const dates = [now, addCalendarDaysInTimezone(now, 7, timezone)];
 
   if (requiredDate) {
     dates.push(requiredDate);

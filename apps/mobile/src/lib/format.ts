@@ -1,5 +1,5 @@
 import { format } from "date-fns";
-import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 
 import type { BookingStatus } from "@/src/types/api";
 
@@ -24,9 +24,8 @@ export function bookingTime(value: string, timezone: string) {
   return formatInTimeZone(value, timezone, "h:mm a");
 }
 
-export function defaultBookingFields() {
-  const now = new Date();
-  const start = new Date(now);
+export function defaultBookingFields(timezone: string) {
+  const start = toZonedTime(new Date(), timezone);
   
   if (start.getMinutes() < 30) {
     start.setMinutes(30, 0, 0);
@@ -64,6 +63,15 @@ export function bookingRange(
 
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     throw new Error("Enter a valid date and time");
+  }
+
+  if (
+    formatInTimeZone(start, timezone, "yyyy-MM-dd HH:mm") !==
+      `${date} ${startTime}` ||
+    formatInTimeZone(end, timezone, "yyyy-MM-dd HH:mm") !==
+      `${date} ${endTime}`
+  ) {
+    throw new Error("Enter a real date and time in your society timezone");
   }
 
   if (end <= start) {

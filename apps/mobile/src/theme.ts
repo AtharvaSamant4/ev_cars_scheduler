@@ -37,7 +37,7 @@ export const fonts = {
   medium: undefined,
   semiBold: undefined,
   bold: undefined,
-} as any;
+};
 
 export const shadows = {
   sm: {

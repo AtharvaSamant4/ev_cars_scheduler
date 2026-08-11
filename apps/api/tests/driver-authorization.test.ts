@@ -198,13 +198,39 @@ describe("Driver booking authorization", () => {
   it("rejects another driver even when both profiles share the primary vehicle", async () => {
     await expect(driverArrive(otherDriverUser, bookingId)).rejects.toThrow("assigned to another driver");
     const arrived = await driverArrive(assignedDriverUser, bookingId);
-    await expect(verifyOtp(otherDriverUser, bookingId, arrived.otp!)).rejects.toThrow("assigned to another driver");
-    await verifyOtp(assignedDriverUser, bookingId, arrived.otp!);
-    await expect(completeTrip(otherDriverUser, bookingId, scheduledEnd.toISOString())).rejects.toThrow("assigned to another driver");
-    await expect(completeTrip(assignedDriverUser, bookingId, scheduledEnd.toISOString())).resolves.toMatchObject({
+    expect(arrived).not.toHaveProperty("otp");
+    expect(arrived.user).not.toHaveProperty("passwordHash");
+    const otp = (await prisma.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { otp: true },
+    })).otp!;
+    expect(otp).toMatch(/^\d{6}$/);
+
+    await expect(verifyOtp(otherDriverUser, bookingId, otp)).rejects.toThrow("assigned to another driver");
+    const started = await verifyOtp(assignedDriverUser, bookingId, otp);
+    expect(started).not.toHaveProperty("otp");
+    expect(started.user).not.toHaveProperty("passwordHash");
+
+    const actualEndTime = new Date(Date.now() - 1_000);
+    const actualStartTime = new Date(actualEndTime.getTime() - 10 * 60_000);
+    const historicalStartTime = new Date(actualEndTime.getTime() - 60 * 60_000);
+    await prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        startTime: historicalStartTime,
+        endTime: actualEndTime,
+        actualRideStartTime: actualStartTime,
+      },
+    });
+
+    await expect(completeTrip(otherDriverUser, bookingId)).rejects.toThrow("assigned to another driver");
+    const completed = await completeTrip(assignedDriverUser, bookingId);
+    expect(completed).toMatchObject({
       status: BookingStatus.COMPLETED,
       reassignedVehicle: { id: reserveVehicleId },
     });
+    expect(completed).not.toHaveProperty("otp");
+    expect(completed.user).not.toHaveProperty("passwordHash");
   });
 
   it("keeps completed reassigned trips in only the assigned driver's history", async () => {

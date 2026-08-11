@@ -33,12 +33,19 @@ export function toAppError(error: unknown) {
         409,
         "DUPLICATE_RESOURCE",
         "A resource with these details already exists",
-        error.meta,
       );
     }
 
     if (error.code === "P2025") {
       return new AppError(404, "NOT_FOUND", "The requested resource was not found");
+    }
+
+    if (error.code === "P2028" || error.code === "P2034") {
+      return new AppError(
+        503,
+        "DATABASE_BUSY",
+        "The service is temporarily busy. Please try again.",
+      );
     }
   }
 

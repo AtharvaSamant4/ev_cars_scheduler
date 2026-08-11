@@ -1,8 +1,13 @@
 import PDFDocument from "pdfkit";
-import { prisma } from "@society-ev/db";
+import { prisma, UserRole } from "@society-ev/db";
 import { AppError } from "@/src/lib/errors";
 
-export async function generateInvoicePdf(bookingId: string, societyId: string, userId: string, role: string): Promise<Buffer> {
+export async function generateInvoicePdf(
+  bookingId: string,
+  societyId: string,
+  userId: string,
+  role: UserRole,
+): Promise<Buffer> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId, societyId },
     include: {
@@ -10,6 +15,7 @@ export async function generateInvoicePdf(bookingId: string, societyId: string, u
       flat: { include: { resident: true } },
       user: true,
       vehicle: true,
+      reassignedVehicle: true,
       society: true,
     }
   });
@@ -20,9 +26,19 @@ export async function generateInvoicePdf(bookingId: string, societyId: string, u
 
   const invoice = booking.invoice;
 
-  if (role === "RESIDENT" && booking.userId !== userId) {
+  if (
+    role !== UserRole.ADMIN &&
+    !(role === UserRole.RESIDENT && booking.userId === userId)
+  ) {
     throw new AppError(403, "FORBIDDEN", "You don't have access to this invoice");
   }
+
+  const effectiveVehicle = booking.reassignedVehicle ?? booking.vehicle;
+  const dateTime = (value: Date) => new Intl.DateTimeFormat("en-IN", {
+    timeZone: booking.society.timezone,
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(value);
 
   return new Promise((resolve, reject) => {
     try {
@@ -80,9 +96,9 @@ export async function generateInvoicePdf(bookingId: string, societyId: string, u
       // Vehicle Info
       doc.fillColor(primaryColor).fontSize(12).font('Helvetica-Bold').text('VEHICLE DETAILS', 330, 165);
       doc.fillColor(secondaryColor).fontSize(10).font('Helvetica')
-         .text(`Vehicle: ${booking.vehicle.name}`, 330, 185)
-         .text(`Reg No: ${booking.vehicle.registrationNumber}`, 330, 200)
-         .text(`Date: ${invoice.generatedAt.toLocaleDateString()}`, 330, 215);
+         .text(`Vehicle: ${effectiveVehicle.name}`, 330, 185)
+         .text(`Reg No: ${effectiveVehicle.registrationNumber}`, 330, 200)
+         .text(`Date: ${dateTime(invoice.generatedAt)}`, 330, 215);
 
       // 3. Trip Timing Section
       doc.moveDown(4);
@@ -102,10 +118,10 @@ export async function generateInvoicePdf(bookingId: string, societyId: string, u
 
       currentY += 15;
       doc.fillColor(primaryColor).fontSize(9).font('Helvetica');
-      doc.text(booking.startTime.toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }), 50, currentY);
-      doc.text(booking.endTime.toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }), 155, currentY);
-      doc.text(booking.actualRideStartTime ? booking.actualRideStartTime.toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }) : '-', 260, currentY);
-      doc.text(booking.actualEndTime ? booking.actualEndTime.toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }) : '-', 365, currentY);
+      doc.text(dateTime(booking.startTime), 50, currentY, { width: 95 });
+      doc.text(dateTime(booking.endTime), 155, currentY, { width: 95 });
+      doc.text(booking.actualRideStartTime ? dateTime(booking.actualRideStartTime) : '-', 260, currentY, { width: 95 });
+      doc.text(booking.actualEndTime ? dateTime(booking.actualEndTime) : '-', 365, currentY, { width: 105 });
       
       const durationHours = (booking.durationMinutes / 60).toFixed(1);
       doc.text(`${durationHours} hrs`, 480, currentY);

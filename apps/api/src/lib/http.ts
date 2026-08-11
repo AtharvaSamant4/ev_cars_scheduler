@@ -51,6 +51,25 @@ export async function parseBody<TSchema extends z.ZodType>(
   return schema.parse(body);
 }
 
+export async function parseOptionalBody<TSchema extends z.ZodType>(
+  request: NextRequest,
+  schema: TSchema,
+): Promise<z.infer<TSchema>> {
+  const text = await request.text();
+  if (!text.trim()) {
+    return schema.parse({});
+  }
+
+  try {
+    return schema.parse(JSON.parse(text));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new AppError(400, "INVALID_JSON", "Request body must be valid JSON");
+    }
+    throw error;
+  }
+}
+
 export function parseQuery<TSchema extends z.ZodType>(
   request: NextRequest,
   schema: TSchema,
@@ -59,6 +78,16 @@ export function parseQuery<TSchema extends z.ZodType>(
 }
 
 export async function routeId(context: RouteContext, name = "id") {
+  const value = await routeParam(context, name);
+
+  if (!z.string().uuid().safeParse(value).success) {
+    throw new AppError(400, "INVALID_ROUTE", `Invalid route parameter: ${name}`);
+  }
+
+  return value;
+}
+
+export async function routeParam(context: RouteContext, name: string) {
   const params = await context.params;
   const value = params[name];
 

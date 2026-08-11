@@ -21,19 +21,29 @@ export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   user: null,
   hydrate: async () => {
-    const session = await readSession();
-    set({
-      hydrated: true,
-      token: session?.token ?? null,
-      user: session?.user ?? null,
-    });
+    try {
+      const session = await readSession();
+      set({
+        hydrated: true,
+        token: session?.token ?? null,
+        user: session?.user ?? null,
+      });
+    } catch {
+      set({ hydrated: true, token: null, user: null });
+    }
   },
   setSession: async ({ token, user }) => {
-    await saveSession(token, user);
-    set({ token, user });
+    try {
+      await saveSession(token, user);
+      set({ token, user });
+    } catch (error) {
+      await clearSession().catch(() => undefined);
+      set({ token: null, user: null });
+      throw error;
+    }
   },
   logout: async () => {
-    await clearSession();
+    await clearSession().catch(() => undefined);
     set({ token: null, user: null });
   },
 }));

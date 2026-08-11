@@ -94,6 +94,32 @@ describe("AT_RISK resident cancellation", () => {
     expect(transactions.filter((transaction) => transaction.type === TransactionType.PENALTY)).toHaveLength(1);
   });
 
+  it("lets the owning resident cancel a future DRIVER_ASSIGNED booking", async () => {
+    const start = slot(2);
+    const created = await createBooking(
+      resident,
+      start.toISOString(),
+      new Date(start.getTime() + 60 * 60_000).toISOString(),
+      vehicleId,
+    );
+    await prisma.booking.update({
+      where: { id: created.booking.id },
+      data: { status: BookingStatus.DRIVER_ASSIGNED },
+    });
+
+    const cancelled = await cancelBooking(resident, created.booking.id);
+    expect(cancelled.booking.status).toBe(BookingStatus.CANCELLED);
+    expect(cancelled.quota.usedMinutes).toBe(0);
+    expect((await prisma.wallet.findUniqueOrThrow({ where: { userId: resident.id } })).balance).toBe(4_900);
+
+    const transactions = await prisma.walletTransaction.findMany({
+      where: { bookingId: created.booking.id },
+    });
+    expect(transactions.filter((transaction) => transaction.type === TransactionType.BOOKING_DEBIT)).toHaveLength(1);
+    expect(transactions.filter((transaction) => transaction.type === TransactionType.REFUND)).toHaveLength(1);
+    expect(transactions.filter((transaction) => transaction.type === TransactionType.PENALTY)).toHaveLength(1);
+  });
+
   it("does not cancel an already started or completed ride", async () => {
     const startedAt = new Date();
     const inProgressStart = slot(3);
@@ -112,7 +138,9 @@ describe("AT_RISK resident cancellation", () => {
         actualRideStartTime: startedAt,
       },
     });
-    await expect(cancelBooking(resident, inProgress.booking.id)).rejects.toThrow("Only future booked or at-risk");
+    await expect(cancelBooking(resident, inProgress.booking.id)).rejects.toThrow(
+      "Only future reservations that have not started",
+    );
 
     const completedStart = slot(5);
     const completed = await createBooking(
@@ -125,6 +153,8 @@ describe("AT_RISK resident cancellation", () => {
       where: { id: completed.booking.id },
       data: { status: BookingStatus.COMPLETED, actualEndTime: new Date() },
     });
-    await expect(cancelBooking(resident, completed.booking.id)).rejects.toThrow("Only future booked or at-risk");
+    await expect(cancelBooking(resident, completed.booking.id)).rejects.toThrow(
+      "Only future reservations that have not started",
+    );
   });
 });

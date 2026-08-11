@@ -6,10 +6,15 @@ import {
   TransactionType,
   ReassignReason,
 } from "@society-ev/db";
+import { randomInt } from "node:crypto";
 import { toZonedTime } from "date-fns-tz";
 
 import type { AuthUser } from "@/src/lib/auth";
-import { getIsoWeek } from "@/src/lib/date";
+import {
+  formatDateInTimezone,
+  formatDateTimeInTimezone,
+  getIsoWeek,
+} from "@/src/lib/date";
 import { AppError } from "@/src/lib/errors";
 import { paginated, pagination } from "@/src/lib/pagination";
 import { ensureWeeklyQuotaHorizon } from "@/src/modules/quotas/service";
@@ -41,6 +46,40 @@ type LockedReserveVehicle = {
   id: string;
   name: string;
 };
+
+const ACTIVE_PRE_START_STATUSES: BookingStatus[] = [
+  BookingStatus.BOOKED,
+  BookingStatus.DRIVER_ASSIGNED,
+  BookingStatus.REASSIGNED,
+  BookingStatus.AT_RISK,
+];
+
+const CANCELLABLE_STATUSES = new Set(ACTIVE_PRE_START_STATUSES);
+
+const driverActionInclude = {
+  vehicle: true,
+  reassignedVehicle: true,
+  driver: {
+    select: { id: true, fullName: true, phoneNumber: true, vehicleId: true },
+  },
+  user: { select: { id: true, name: true, phone: true } },
+  flat: { select: { id: true, number: true } },
+} satisfies Prisma.BookingInclude;
+
+const completionInclude = {
+  ...driverActionInclude,
+  invoice: true,
+} satisfies Prisma.BookingInclude;
+
+function secureOtp(previousOtp?: string | null) {
+  let otp: string;
+
+  do {
+    otp = randomInt(100_000, 1_000_000).toString();
+  } while (otp === previousOtp);
+
+  return otp;
+}
 
 export function residentFlatId(user: AuthUser) {
   if (user.role !== UserRole.RESIDENT || !user.flatId) {
@@ -169,14 +208,6 @@ export function normalizeBookingRange(
     );
   }
 
-  if (localStart.getFullYear() !== localEnd.getFullYear()) {
-    throw new AppError(
-      400,
-      "INVALID_TIME_RANGE",
-      "A booking cannot cross a calendar-year boundary",
-    );
-  }
-
   const isoDate = getIsoWeek(localStart);
 
   return {
@@ -207,11 +238,16 @@ export function bookingResponse<
 >(booking: T) {
   return {
     ...booking,
-    effectiveStatus:
-      booking.status === BookingStatus.BOOKED && booking.endTime <= new Date()
-        ? BookingStatus.COMPLETED
-        : booking.status,
+    effectiveStatus: booking.status,
   };
+}
+
+export function bookingResponseWithoutOtp<
+  T extends { status: BookingStatus; endTime: Date; otp?: string | null },
+>(booking: T) {
+  const safe = { ...booking };
+  delete safe.otp;
+  return bookingResponse(safe);
 }
 
 function isRetryableTransactionError(error: unknown) {
@@ -333,13 +369,26 @@ export async function checkAvailability(
         societyId: user.societyId,
         status: "AVAILABLE",
         isReserve: false,
-        bookings: {
-          none: {
-            status: { not: BookingStatus.CANCELLED },
-            startTime: { lt: new Date(range.endTime.getTime() + 30 * 60000) },
-            endTime: { gt: new Date(range.startTime.getTime() - 30 * 60000) },
+        AND: [
+          {
+            bookings: {
+              none: {
+                status: { not: BookingStatus.CANCELLED },
+                startTime: { lt: new Date(range.endTime.getTime() + 30 * 60000) },
+                endTime: { gt: new Date(range.startTime.getTime() - 30 * 60000) },
+              },
+            },
           },
-        },
+          {
+            reassignedBookings: {
+              none: {
+                status: { not: BookingStatus.CANCELLED },
+                startTime: { lt: new Date(range.endTime.getTime() + 30 * 60000) },
+                endTime: { gt: new Date(range.startTime.getTime() - 30 * 60000) },
+              },
+            },
+          },
+        ],
       },
       select: {
         id: true,
@@ -427,7 +476,7 @@ export async function createBooking(
             AND NOT EXISTS (
               SELECT 1 
               FROM "Booking" 
-              WHERE "vehicleId" = ${vehicleId}::uuid
+               WHERE ("vehicleId" = ${vehicleId}::uuid OR "reassignedVehicleId" = ${vehicleId}::uuid)
                 AND "status" != 'CANCELLED'
                 AND "startTime" < ${new Date(range.endTime.getTime() + 30 * 60000)}
                 AND "endTime" > ${new Date(range.startTime.getTime() - 30 * 60000)}
@@ -454,8 +503,6 @@ export async function createBooking(
         if (!wallet || wallet.balance < bookingCost) {
           throw new AppError(400, "INSUFFICIENT_BALANCE", "Insufficient wallet balance.");
         }
-
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
         const mappedDrivers = await tx.$queryRaw<MappedDriver[]>`
           SELECT driver."id"
@@ -489,7 +536,6 @@ export async function createBooking(
             status: mappedDriver
               ? BookingStatus.DRIVER_ASSIGNED
               : BookingStatus.BOOKED,
-            otp,
           },
           include: {
             vehicle: {
@@ -504,6 +550,13 @@ export async function createBooking(
                 id: true,
                 fullName: true,
                 phoneNumber: true,
+              },
+            },
+            reassignedVehicle: {
+              select: {
+                id: true,
+                name: true,
+                registrationNumber: true,
               },
             },
           },
@@ -641,6 +694,7 @@ export async function getResidentBooking(user: AuthUser, bookingId: string) {
 
 export async function cancelBooking(user: AuthUser, bookingId: string) {
   const flatId = residentFlatId(user);
+  const timezone = await societyTimezone(user.societyId);
 
   return serializable(() =>
     prisma.$transaction(
@@ -649,6 +703,8 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
           SELECT "id"
           FROM "Booking"
           WHERE "id" = ${bookingId}::uuid
+            AND "societyId" = ${user.societyId}::uuid
+            AND "flatId" = ${flatId}::uuid
           FOR UPDATE
         `;
 
@@ -666,6 +722,13 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
                 registrationNumber: true,
               },
             },
+            reassignedVehicle: {
+              select: {
+                id: true,
+                name: true,
+                registrationNumber: true,
+              },
+            },
           },
         });
 
@@ -673,15 +736,11 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
           throw new AppError(404, "NOT_FOUND", "Booking not found");
         }
 
-        if (
-          (booking.status !== BookingStatus.BOOKED &&
-            booking.status !== BookingStatus.AT_RISK) ||
-          booking.startTime <= new Date()
-        ) {
+        if (!CANCELLABLE_STATUSES.has(booking.status) || booking.startTime <= new Date()) {
           throw new AppError(
             409,
             "BOOKING_NOT_CANCELLABLE",
-            "Only future booked or at-risk reservations can be cancelled",
+            "Only future reservations that have not started can be cancelled",
           );
         }
 
@@ -693,6 +752,13 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
           },
           include: {
             vehicle: {
+              select: {
+                id: true,
+                name: true,
+                registrationNumber: true,
+              },
+            },
+            reassignedVehicle: {
               select: {
                 id: true,
                 name: true,
@@ -728,7 +794,7 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
             {
               amount: deduction,
               type: TransactionType.REFUND,
-              description: `Refund for cancelled booking on ${booking.startTime.toDateString()}`,
+              description: `Refund for cancelled booking on ${formatDateInTimezone(booking.startTime, timezone)}`,
               bookingId: booking.id,
             }
           ];
@@ -779,6 +845,15 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
           };
         }
 
+
+        await tx.notification.create({
+          data: {
+            userId: booking.userId,
+            title: "Booking Cancelled",
+            message: `Your booking for ${formatDateTimeInTimezone(booking.startTime, timezone)} was cancelled.`,
+          },
+        });
+
         return {
           booking: bookingResponse(cancelled),
           quota: quotaResponse(updatedQuota),
@@ -803,6 +878,8 @@ export async function reassignBooking(
     throw new AppError(403, "FORBIDDEN", "Only admins can reassign bookings");
   }
 
+  const timezone = await societyTimezone(user.societyId);
+
   return serializable(() =>
     prisma.$transaction(
       async (tx) => {
@@ -818,8 +895,12 @@ export async function reassignBooking(
           throw new AppError(404, "NOT_FOUND", "Booking not found");
         }
 
-        if (booking.status === "CANCELLED" || booking.status === "COMPLETED") {
-          throw new AppError(409, "INVALID_STATUS", "Booking is no longer active");
+        if (!ACTIVE_PRE_START_STATUSES.includes(booking.status)) {
+          throw new AppError(
+            409,
+            "INVALID_STATUS",
+            "Only a reservation that has not started can be reassigned",
+          );
         }
 
         const vehicles = await tx.$queryRaw<LockedReserveVehicle[]>`
@@ -852,7 +933,11 @@ export async function reassignBooking(
         const updated = await tx.booking.update({
           where: { id: bookingId },
           data: {
-            status: booking.status === "AT_RISK" ? "BOOKED" : booking.status,
+            status: booking.status === BookingStatus.AT_RISK
+              ? booking.driverId
+                ? BookingStatus.DRIVER_ASSIGNED
+                : BookingStatus.BOOKED
+              : booking.status,
             reassignedVehicleId: vehicle.id,
             reassignedReason: reason,
             reassignedAt: new Date(),
@@ -884,7 +969,7 @@ export async function reassignBooking(
           data: {
             userId: booking.userId,
             title: "Booking Reassigned",
-            message: `Your booking on ${booking.startTime.toLocaleDateString()} has been reassigned to ${vehicle.name}.`,
+            message: `Your booking on ${formatDateInTimezone(booking.startTime, timezone)} has been reassigned to ${vehicle.name}.`,
           }
         });
 
@@ -908,47 +993,66 @@ export async function assignDriver(
     throw new AppError(403, "FORBIDDEN", "Only admins can assign drivers");
   }
 
-  const driver = await prisma.driver.findUnique({
-    where: { id: driverId },
-  });
+  return serializable(() => prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Booking"
+      WHERE "id" = ${bookingId}::uuid
+        AND "societyId" = ${user.societyId}::uuid
+      FOR UPDATE
+    `;
+    if (!locked[0]) {
+      throw new AppError(404, "NOT_FOUND", "Booking not found");
+    }
 
-  if (!driver || driver.societyId !== user.societyId) {
-    throw new AppError(404, "NOT_FOUND", "Driver not found");
-  }
+    const [booking, driver] = await Promise.all([
+      tx.booking.findUniqueOrThrow({ where: { id: bookingId } }),
+      tx.driver.findFirst({
+        where: { id: driverId, societyId: user.societyId, isActive: true },
+      }),
+    ]);
 
-  if (!driver.isActive) {
-    throw new AppError(400, "INACTIVE", "Cannot assign an inactive driver");
-  }
+    if (!driver) {
+      throw new AppError(404, "NOT_FOUND", "Active driver not found");
+    }
 
-  const booking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-  });
+    const account = await tx.user.findFirst({
+      where: {
+        societyId: user.societyId,
+        role: UserRole.DRIVER,
+        phone: driver.phoneNumber,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    if (!account) {
+      throw new AppError(409, "DRIVER_ACCOUNT_MISSING", "Driver login account is missing or inactive");
+    }
 
-  if (!booking || booking.societyId !== user.societyId) {
-    throw new AppError(404, "NOT_FOUND", "Booking not found");
-  }
+    if (!ACTIVE_PRE_START_STATUSES.includes(booking.status)) {
+      throw new AppError(
+        409,
+        "INVALID_STATUS",
+        "A driver cannot be changed after arrival or ride start",
+      );
+    }
 
-  if (booking.status === "CANCELLED" || booking.status === "COMPLETED") {
-    throw new AppError(409, "INVALID_STATUS", "Booking is no longer active");
-  }
+    const updated = await tx.booking.update({
+      where: { id: bookingId },
+      data: {
+        driverId,
+        status: booking.status === BookingStatus.BOOKED || booking.status === BookingStatus.REASSIGNED
+          ? BookingStatus.DRIVER_ASSIGNED
+          : booking.status,
+      },
+      include: driverActionInclude,
+    });
 
-  const updatedStatus = booking.status === "BOOKED" ? "DRIVER_ASSIGNED" : booking.status;
-
-  const updated = await prisma.booking.update({
-    where: { id: bookingId },
-    data: { 
-      driverId,
-      status: updatedStatus 
-    },
-    include: {
-      vehicle: true,
-      driver: true,
-      user: true,
-      flat: true,
-    },
-  });
-
-  return bookingResponse(updated);
+    return bookingResponseWithoutOtp(updated);
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 5_000,
+    timeout: 10_000,
+  }));
 }
 
 export async function driverArrive(user: AuthUser, bookingId: string) {
@@ -959,6 +1063,16 @@ export async function driverArrive(user: AuthUser, bookingId: string) {
   const driver = await assignedDriverProfile(user);
 
   return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Booking"
+      WHERE "id" = ${bookingId}::uuid
+        AND "societyId" = ${user.societyId}::uuid
+      FOR UPDATE
+    `;
+    if (!locked[0]) {
+      throw new AppError(404, "NOT_FOUND", "Booking not found");
+    }
+
     const booking = await tx.booking.findUnique({
       where: { id: bookingId, societyId: user.societyId },
     });
@@ -969,12 +1083,26 @@ export async function driverArrive(user: AuthUser, bookingId: string) {
 
     assertAssignedDriver(booking.driverId, driver.id);
 
-    if (booking.status !== "DRIVER_ASSIGNED" && booking.status !== "BOOKED") {
-      throw new AppError(400, "INVALID_STATUS", "Booking is not ready for arrival");
+    const now = new Date();
+    const firstArrival =
+      booking.status === BookingStatus.DRIVER_ASSIGNED ||
+      booking.status === BookingStatus.BOOKED ||
+      booking.status === BookingStatus.REASSIGNED;
+    const eligibleRegeneration =
+      booking.status === BookingStatus.OTP_PENDING &&
+      (!booking.otpExpiresAt || booking.otpExpiresAt <= now);
+
+    if (!firstArrival && !eligibleRegeneration) {
+      throw new AppError(
+        409,
+        "INVALID_STATUS",
+        booking.status === BookingStatus.OTP_PENDING
+          ? "The current OTP is still valid"
+          : "Booking is not ready for arrival",
+      );
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const now = new Date();
+    const otp = secureOtp(booking.otp);
     const expiresAt = new Date(now.getTime() + 15 * 60000); // 15 mins
 
     const updated = await tx.booking.update({
@@ -986,17 +1114,12 @@ export async function driverArrive(user: AuthUser, bookingId: string) {
         otpExpiresAt: expiresAt,
         otpAttempts: 0,
         otpVerified: false,
+        otpVerifiedAt: null,
       },
-      include: {
-        vehicle: true,
-        reassignedVehicle: true,
-        driver: true,
-        user: true,
-        flat: true,
-      },
+      include: driverActionInclude,
     });
 
-    return bookingResponse(updated);
+    return bookingResponseWithoutOtp(updated);
   });
 }
 
@@ -1008,6 +1131,16 @@ export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) 
   const driver = await assignedDriverProfile(user);
 
   const result = await prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Booking"
+      WHERE "id" = ${bookingId}::uuid
+        AND "societyId" = ${user.societyId}::uuid
+      FOR UPDATE
+    `;
+    if (!locked[0]) {
+      throw new AppError(404, "NOT_FOUND", "Booking not found");
+    }
+
     const booking = await tx.booking.findUnique({
       where: { id: bookingId, societyId: user.societyId },
     });
@@ -1028,7 +1161,7 @@ export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) 
 
     const now = new Date();
 
-    if (!booking.otpExpiresAt || now > booking.otpExpiresAt) {
+    if (!booking.otpExpiresAt || now >= booking.otpExpiresAt) {
       throw new AppError(400, "OTP_EXPIRED", "OTP has expired");
     }
 
@@ -1047,17 +1180,13 @@ export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) 
         otpVerified: true,
         otpVerifiedAt: now,
         actualRideStartTime: now,
+        otp: null,
+        otpExpiresAt: null,
       },
-      include: {
-        vehicle: true,
-        reassignedVehicle: true,
-        driver: true,
-        user: true,
-        flat: true,
-      },
+      include: driverActionInclude,
     });
 
-    return { invalidOtp: false as const, booking: bookingResponse(updated) };
+    return { invalidOtp: false as const, booking: bookingResponseWithoutOtp(updated) };
   });
 
   if (result.invalidOtp) {
@@ -1078,6 +1207,16 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
   }
 
   return serializable(() => prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Booking"
+      WHERE "id" = ${bookingId}::uuid
+        AND "societyId" = ${user.societyId}::uuid
+      FOR UPDATE
+    `;
+    if (!locked[0]) {
+      throw new AppError(404, "NOT_FOUND", "Booking not found");
+    }
+
     const booking = await tx.booking.findUnique({
       where: { id: bookingId, societyId: user.societyId },
       include: { vehicle: true, reassignedVehicle: true },
@@ -1089,6 +1228,14 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
 
     if (user.role === "DRIVER") {
       assertAssignedDriver(booking.driverId, driverProfileId!);
+
+      if (actualEndTimeValue !== undefined) {
+        throw new AppError(
+          400,
+          "DRIVER_END_TIME_OVERRIDE_FORBIDDEN",
+          "Drivers cannot override the server-recorded completion time",
+        );
+      }
     }
 
     if (
@@ -1103,15 +1250,19 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
       );
     }
 
-    const actualEndTime = actualEndTimeValue ? new Date(actualEndTimeValue) : new Date();
+    const now = new Date();
+    const actualEndTime = actualEndTimeValue === undefined
+      ? now
+      : new Date(actualEndTimeValue);
     if (
       Number.isNaN(actualEndTime.getTime()) ||
-      actualEndTime < booking.actualRideStartTime
+      actualEndTime <= booking.actualRideStartTime ||
+      actualEndTime > now
     ) {
       throw new AppError(
         400,
         "INVALID_END_TIME",
-        "Actual end time must be after the ride start time",
+        "Actual end time must be after the ride start and cannot be in the future",
       );
     }
 
@@ -1129,25 +1280,30 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
     }
 
     if (penaltyAmount > 0 && penaltyRule) {
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(hashtext(${`wallet:${booking.userId}`}))
+      `;
       const wallets = await tx.$queryRaw<{id: string, balance: number}[]>`
         SELECT "id", "balance" FROM "Wallet" WHERE "userId" = ${booking.userId}::uuid FOR UPDATE
       `;
-      const wallet = wallets[0];
-      if (wallet) {
-        await tx.wallet.update({
-          where: { id: wallet.id },
-          data: { balance: { decrement: penaltyAmount } }
-        });
-        await tx.walletTransaction.create({
-          data: {
-            walletId: wallet.id,
-            amount: penaltyAmount,
-            type: "PENALTY",
-            description: "Late Return Penalty",
-            bookingId: booking.id
-          }
-        });
-      }
+      const wallet = wallets[0] ?? await tx.wallet.create({
+        data: { userId: booking.userId, balance: 0 },
+        select: { id: true, balance: true },
+      });
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          balance: { decrement: penaltyAmount },
+          transactions: {
+            create: {
+              amount: penaltyAmount,
+              type: TransactionType.PENALTY,
+              description: "Late Return Penalty",
+              bookingId: booking.id,
+            },
+          },
+        },
+      });
 
       await tx.penalty.create({
         data: {
@@ -1160,7 +1316,16 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
       });
     }
 
-    const subtotal = Math.round((booking.durationMinutes / 60) * booking.vehicle.hourlyRate);
+    const bookingDebit = await tx.walletTransaction.findFirst({
+      where: {
+        bookingId: booking.id,
+        type: TransactionType.BOOKING_DEBIT,
+      },
+      orderBy: { createdAt: "asc" },
+      select: { amount: true },
+    });
+    const subtotal = bookingDebit?.amount ??
+      Math.round((booking.durationMinutes / 60) * booking.vehicle.hourlyRate);
     const totalAmount = subtotal + penaltyAmount;
 
     await tx.invoice.create({
@@ -1178,16 +1343,9 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
         status: "COMPLETED",
         actualEndTime,
       },
-      include: {
-        vehicle: true,
-        reassignedVehicle: true,
-        driver: true,
-        user: true,
-        flat: true,
-        invoice: true
-      },
+      include: completionInclude,
     });
 
-    return bookingResponse(updated);
+    return bookingResponseWithoutOtp(updated);
   }));
 }

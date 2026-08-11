@@ -1,11 +1,86 @@
 import { useAuthStore } from "@/src/store/auth";
 import type { ApiErrorPayload } from "@/src/types/api";
 
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
 const API_URL = (
-  process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:3000/api/v1"
+  configuredApiUrl || "http://127.0.0.1:3000/api/v1"
 ).replace(/\/$/, "");
 
-export const apiBaseUrl = API_URL;
+type QueryValue = string | number | boolean;
+
+function appendQuery(
+  url: URL,
+  query: Record<string, QueryValue | undefined>,
+) {
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+}
+
+function relativeUrlPath(path: string) {
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
+    throw new Error("API paths must be root-relative");
+  }
+
+  return path.slice(1);
+}
+
+export function buildApiUrl(
+  path: string,
+  query: Record<string, QueryValue | undefined> = {},
+) {
+  const relativePath = relativeUrlPath(path);
+  const baseUrl = new URL(`${API_URL}/`);
+  const url = new URL(relativePath, baseUrl);
+  if (
+    url.origin !== baseUrl.origin ||
+    !url.pathname.startsWith(baseUrl.pathname)
+  ) {
+    throw new Error("API path escaped the configured API base URL");
+  }
+  appendQuery(url, query);
+  return url.toString();
+}
+
+export function buildConfiguredAppUrl(
+  path: string,
+  query: Record<string, QueryValue | undefined> = {},
+) {
+  if (!configuredApiUrl) {
+    throw new Error(
+      "EXPO_PUBLIC_API_URL is required for QR demo links on a physical device",
+    );
+  }
+
+  const apiUrl = new URL(configuredApiUrl);
+  if (apiUrl.protocol !== "http:" && apiUrl.protocol !== "https:") {
+    throw new Error("EXPO_PUBLIC_API_URL must use HTTP or HTTPS");
+  }
+
+  const relativePath = relativeUrlPath(path);
+  const url = new URL(relativePath, `${apiUrl.origin}/`);
+  appendQuery(url, query);
+  return url.toString();
+}
+
+export function isConfiguredAppUrl(value: string, expectedPath: string) {
+  try {
+    const expected = new URL(buildConfiguredAppUrl(expectedPath));
+    const scanned = new URL(value);
+    return (
+      scanned.protocol === expected.protocol &&
+      scanned.host === expected.host &&
+      !scanned.username &&
+      !scanned.password &&
+      scanned.pathname.replace(/\/$/, "") ===
+        expected.pathname.replace(/\/$/, "")
+    );
+  } catch {
+    return false;
+  }
+}
 
 export class ApiError extends Error {
   constructor(
@@ -36,7 +111,7 @@ export async function apiRequest<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     ...options,
     headers,
   });

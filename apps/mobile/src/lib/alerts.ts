@@ -7,6 +7,7 @@ type ConfirmOptions = {
   cancelLabel?: string;
   destructive?: boolean;
   onConfirm: () => void | Promise<void>;
+  onCancel?: () => void;
 };
 
 export function confirmAction({
@@ -16,22 +17,30 @@ export function confirmAction({
   cancelLabel = "Cancel",
   destructive = false,
   onConfirm,
+  onCancel,
 }: ConfirmOptions) {
   if (Platform.OS === "web") {
     if (window.confirm(`${title}\n\n${message}`)) {
       void onConfirm();
+    } else {
+      onCancel?.();
     }
     return;
   }
 
-  Alert.alert(title, message, [
-    { text: cancelLabel, style: "cancel" },
-    {
-      text: confirmLabel,
-      style: destructive ? "destructive" : "default",
-      onPress: () => void onConfirm(),
-    },
-  ]);
+  Alert.alert(
+    title,
+    message,
+    [
+      { text: cancelLabel, style: "cancel", onPress: onCancel },
+      {
+        text: confirmLabel,
+        style: destructive ? "destructive" : "default",
+        onPress: () => void onConfirm(),
+      },
+    ],
+    { cancelable: true, onDismiss: onCancel },
+  );
 }
 
 export function notify(title: string, message: string) {

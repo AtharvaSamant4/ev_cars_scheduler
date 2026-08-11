@@ -120,11 +120,17 @@ describe("Ride Start OTP Workflow", () => {
   it("should generate OTP on driver arrival", async () => {
     const result = await driverArrive(driverUser, bookingId);
     expect(result.status).toBe(BookingStatus.OTP_PENDING);
-    expect(result.otp).toHaveLength(6);
+    expect(result).not.toHaveProperty("otp");
+    expect(result.user).not.toHaveProperty("passwordHash");
     expect(result.otpGeneratedAt).toBeDefined();
     expect(result.otpExpiresAt).toBeDefined();
-    
-    otpCode = result.otp!;
+
+    const stored = await prisma.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+      select: { otp: true },
+    });
+    expect(stored.otp).toMatch(/^\d{6}$/);
+    otpCode = stored.otp!;
   });
 
   it("should fail with incorrect OTP", async () => {
@@ -139,6 +145,9 @@ describe("Ride Start OTP Workflow", () => {
     expect(result.status).toBe(BookingStatus.IN_PROGRESS);
     expect(result.otpVerified).toBe(true);
     expect(result.actualRideStartTime).toBeDefined();
+    expect(result).not.toHaveProperty("otp");
+    expect(result.user).not.toHaveProperty("passwordHash");
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).otp).toBeNull();
   });
 
   it("should prevent duplicate OTP verifications", async () => {

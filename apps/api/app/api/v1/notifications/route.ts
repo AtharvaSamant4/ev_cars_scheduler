@@ -1,5 +1,7 @@
+import { notificationReadSchema } from "@society-ev/contracts";
+
 import { requireAuth } from "@/src/lib/auth";
-import { apiRoute, ok } from "@/src/lib/http";
+import { apiRoute, ok, parseBody } from "@/src/lib/http";
 import { getNotifications, markNotificationsRead } from "@/src/modules/residents/service";
 
 export const runtime = "nodejs";
@@ -12,6 +14,7 @@ export const GET = apiRoute(async (request) => {
 
 export const POST = apiRoute(async (request) => {
   const user = await requireAuth(request);
-  await markNotificationsRead(user);
+  const { notificationIds } = await parseBody(request, notificationReadSchema);
+  await markNotificationsRead(user, notificationIds);
   return ok({ success: true });
 });

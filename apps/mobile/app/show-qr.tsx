@@ -1,46 +1,37 @@
-import { useEffect, useState } from "react";
-import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator } from "react-native";
+import { StyleSheet, Text, View, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import QRCode from "react-native-qrcode-svg";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 
+import { ErrorState, LoadingState } from "@/src/components/states";
+import { buildConfiguredAppUrl, errorMessage } from "@/src/lib/api";
 import { useAuthStore } from "@/src/store/auth";
 import { colors, fonts, spacing } from "@/src/theme";
 
 export default function ShowQRScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+  const token = useAuthStore((s) => s.token);
   const hydrated = useAuthStore((s) => s.hydrated);
-  const [localIp, setLocalIp] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Dynamically ask the backend for the laptop's actual Wi-Fi IP address
-    // This solves the localhost problem entirely without any manual entry!
-    fetch("http://localhost:3000/api/v1/ip")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.ip && data.ip !== "localhost") {
-          setLocalIp(data.ip);
-        } else {
-          // Fallback just in case
-          setLocalIp(typeof window !== "undefined" ? window.location.hostname : "192.168.0.x");
-        }
-      })
-      .catch(() => {
-        setLocalIp(typeof window !== "undefined" ? window.location.hostname : "192.168.0.x");
-      });
-  }, []);
-
-  if (!hydrated || !user || !localIp) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+  if (!hydrated) {
+    return <LoadingState label="Preparing recharge QR..." />;
   }
 
-  // The QR code contains the mock payment gateway URL + this specific user's ID
-  const qrUrl = `http://${localIp}:3000/demo-payment?userId=${user.id}`;
+  if (!token || !user) {
+    return <Redirect href="/(auth)/login" />;
+  }
+
+  if (user.role !== "RESIDENT") {
+    return <Redirect href="/(driver)" />;
+  }
+
+  let qrUrl: string;
+  try {
+    qrUrl = buildConfiguredAppUrl("/demo-payment", { userId: user.id });
+  } catch (error) {
+    return <ErrorState message={errorMessage(error)} />;
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -53,7 +44,7 @@ export default function ShowQRScreen() {
 
       <View style={styles.content}>
         <Text style={styles.instructions}>
-          {"Scan this QR code with your phone's camera to securely add funds to your wallet."}
+          {"Scan this code from another device to open the local demo payment page for this resident."}
         </Text>
 
         <View style={styles.qrWrapper}>
@@ -71,7 +62,6 @@ export default function ShowQRScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
     padding: spacing.md,
     flexDirection: "row",

@@ -64,12 +64,32 @@ describe("Mock QR Wallet Recharge Flow", () => {
     expect(requests[0].notes).toBe("Mock Payment via QR");
   });
 
-  it("should reject negative or zero amounts", async () => {
-    await expect(mockRechargeWallet(resident, 0)).rejects.toThrow("strictly between 1 and 10000");
-    await expect(mockRechargeWallet(resident, -500)).rejects.toThrow("strictly between 1 and 10000");
+  it("should reject non-integer, negative, or zero amounts", async () => {
+    await expect(mockRechargeWallet(resident, 0)).rejects.toThrow("whole number between 1 and 10000");
+    await expect(mockRechargeWallet(resident, -500)).rejects.toThrow("whole number between 1 and 10000");
+    await expect(mockRechargeWallet(resident, 1.5)).rejects.toThrow("whole number between 1 and 10000");
   });
 
   it("should reject amounts over the limit", async () => {
-    await expect(mockRechargeWallet(resident, 10001)).rejects.toThrow("strictly between 1 and 10000");
+    await expect(mockRechargeWallet(resident, 10001)).rejects.toThrow("whole number between 1 and 10000");
+  });
+
+  it("preserves every concurrent recharge without a lost balance update", async () => {
+    const before = await prisma.wallet.findUniqueOrThrow({ where: { userId: resident.id } });
+    await Promise.all([
+      mockRechargeWallet(resident, 101),
+      mockRechargeWallet(resident, 202),
+      mockRechargeWallet(resident, 303),
+    ]);
+
+    const after = await prisma.wallet.findUniqueOrThrow({ where: { userId: resident.id } });
+    expect(after.balance).toBe(before.balance + 606);
+    expect(await prisma.walletTransaction.count({
+      where: {
+        walletId: after.id,
+        type: "RECHARGE",
+        amount: { in: [101, 202, 303] },
+      },
+    })).toBe(3);
   });
 });

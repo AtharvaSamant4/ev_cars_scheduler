@@ -5,6 +5,9 @@ import { NextRequest } from "next/server";
 import { AppError } from "./errors";
 
 const COOKIE_NAME = "ev_session";
+const INSECURE_JWT_SECRET_PLACEHOLDERS = new Set([
+  "replace-with-at-least-32-random-characters",
+]);
 
 export type AuthUser = {
   id: string;
@@ -17,8 +20,14 @@ export type AuthUser = {
 function jwtSecret() {
   const secret = process.env.JWT_SECRET;
 
-  if (!secret || secret.length < 32) {
-    throw new Error("JWT_SECRET must contain at least 32 characters");
+  if (
+    !secret ||
+    secret.length < 32 ||
+    INSECURE_JWT_SECRET_PLACEHOLDERS.has(secret)
+  ) {
+    throw new Error(
+      "JWT_SECRET must be a non-placeholder secret containing at least 32 characters",
+    );
   }
 
   return new TextEncoder().encode(secret);
@@ -45,10 +54,37 @@ function requestToken(request: NextRequest) {
     return authorization.slice("Bearer ".length);
   }
 
-  const queryToken = request.nextUrl?.searchParams?.get("token");
-  if (queryToken) return queryToken;
-
   return request.cookies.get(COOKIE_NAME)?.value;
+}
+
+async function activeAuthUser(subject: string): Promise<AuthUser> {
+  const user = await prisma.user.findUnique({
+    where: { id: subject },
+    select: {
+      id: true,
+      societyId: true,
+      flatId: true,
+      role: true,
+      name: true,
+      isActive: true,
+      flat: { select: { isActive: true } },
+    },
+  });
+
+  if (
+    !user?.isActive ||
+    (user.role === UserRole.RESIDENT && (!user.flatId || !user.flat?.isActive))
+  ) {
+    throw new AppError(401, "AUTH_INVALID", "The account is inactive");
+  }
+
+  return {
+    id: user.id,
+    societyId: user.societyId,
+    flatId: user.flatId,
+    role: user.role,
+    name: user.name,
+  };
 }
 
 export async function requireAuth(
@@ -74,27 +110,68 @@ export async function requireAuth(
     throw new AppError(401, "AUTH_INVALID", "The session is invalid");
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: subject },
-    select: {
-      id: true,
-      societyId: true,
-      flatId: true,
-      role: true,
-      name: true,
-      isActive: true,
-    },
-  });
-
-  if (!user?.isActive) {
-    throw new AppError(401, "AUTH_INVALID", "The account is inactive");
-  }
+  const user = await activeAuthUser(subject);
 
   if (requiredRole && user.role !== requiredRole) {
     throw new AppError(403, "FORBIDDEN", "This action is not permitted");
   }
 
   return user;
+}
+
+export async function issueInvoiceDownloadToken(
+  user: AuthUser,
+  bookingId: string,
+) {
+  return new SignJWT({
+    scope: "invoice:download",
+    bookingId,
+    societyId: user.societyId,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(user.id)
+    .setIssuedAt()
+    .setExpirationTime("2m")
+    .sign(jwtSecret());
+}
+
+export async function requireInvoiceDownloadAuth(
+  request: NextRequest,
+  bookingId: string,
+) {
+  try {
+    return await requireAuth(request);
+  } catch (error) {
+    if (!(error instanceof AppError) || error.status !== 401) {
+      throw error;
+    }
+  }
+
+  const token = request.nextUrl.searchParams.get("downloadToken");
+  if (!token) {
+    throw new AppError(401, "AUTH_INVALID", "Authentication is required");
+  }
+
+  try {
+    const verified = await jwtVerify(token, jwtSecret());
+    const subject = verified.payload.sub;
+    if (
+      !subject ||
+      verified.payload.scope !== "invoice:download" ||
+      verified.payload.bookingId !== bookingId
+    ) {
+      throw new Error("Invalid invoice download scope");
+    }
+
+    const user = await activeAuthUser(subject);
+    if (verified.payload.societyId !== user.societyId) {
+      throw new Error("Invoice download society changed");
+    }
+
+    return user;
+  } catch {
+    throw new AppError(401, "AUTH_INVALID", "The download link is invalid or expired");
+  }
 }
 
 export const authCookie = {

@@ -25,7 +25,11 @@ export async function listPenaltyRules(user: AuthUser) {
   }
 
   return prisma.penaltyRule.findMany({
-    where: { societyId: user.societyId, isActive: true },
+    where: {
+      societyId: user.societyId,
+      isActive: true,
+      code: { notIn: ["CANCELLATION", "LATE_RETURN_PER_HOUR"] },
+    },
     orderBy: [{ name: "asc" }, { code: "asc" }],
   });
 }
@@ -67,6 +71,17 @@ export async function applyPenalty(
   }
 
   return await prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM "Booking"
+      WHERE "id" = ${bookingId}::uuid
+        AND "societyId" = ${user.societyId}::uuid
+      FOR UPDATE
+    `;
+    if (!locked[0]) {
+      throw new AppError(404, "NOT_FOUND", "Booking not found");
+    }
+
     const booking = await tx.booking.findUnique({
       where: { id: bookingId },
       include: { user: true },
@@ -86,6 +101,22 @@ export async function applyPenalty(
 
     if (!rule.isActive) {
       throw new AppError(400, "INACTIVE_RULE", "Cannot apply an inactive penalty rule");
+    }
+
+    if (rule.code === "CANCELLATION" || rule.code === "LATE_RETURN_PER_HOUR") {
+      throw new AppError(
+        409,
+        "AUTOMATIC_RULE",
+        "This rule is applied automatically by the booking workflow",
+      );
+    }
+
+    if (booking.status === "COMPLETED" || booking.status === "CANCELLED") {
+      throw new AppError(
+        409,
+        "BOOKING_FINALIZED",
+        "Penalties cannot be added after a booking is finalized",
+      );
     }
 
     // Check for existing penalty of the same rule on this booking
@@ -114,6 +145,9 @@ export async function applyPenalty(
     });
 
     // Handle Wallet Deduction
+    await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(hashtext(${`wallet:${booking.userId}`}))
+    `;
     let wallet = await tx.wallet.findUnique({
       where: { userId: booking.userId },
     });

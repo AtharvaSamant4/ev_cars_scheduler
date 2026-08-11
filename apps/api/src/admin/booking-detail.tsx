@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 import { adminApi, errorMessage } from "./api";
-import { AdminShell, PageHeader, StatusPill } from "./admin-shell";
+import { AdminShell, PageHeader, StatusPill, useAdminUser } from "./admin-shell";
 import { currency, dateTime, hours } from "./format";
 import { useAdminData } from "./hooks";
 import type {
@@ -19,6 +20,7 @@ function ReassignForm({ booking, onSaved }: { booking: Booking; onSaved: () => v
   const [reserveVehicleId, setReserveVehicleId] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   const vehicles = useAdminData(
     () => adminApi<Paginated<Vehicle>>("/admin/vehicles?pageSize=100"),
@@ -35,6 +37,7 @@ function ReassignForm({ booking, onSaved }: { booking: Booking; onSaved: () => v
     }
     setError(null);
     try {
+      setPending(true);
       await adminApi(`/admin/bookings/${booking.id}/reassign`, {
         method: "POST",
         body: JSON.stringify({ reserveVehicleId, reason }),
@@ -42,6 +45,8 @@ function ReassignForm({ booking, onSaved }: { booking: Booking; onSaved: () => v
       onSaved();
     } catch (error: unknown) {
       setError(errorMessage(error));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -81,7 +86,9 @@ function ReassignForm({ booking, onSaved }: { booking: Booking; onSaved: () => v
       </div>
       {error && <div className="error">{error}</div>}
       <div className="actions">
-        <button type="submit" className="button danger">Reassign Vehicle</button>
+        <button type="submit" className="button danger" disabled={pending}>
+          {pending ? "Reassigning..." : "Reassign Vehicle"}
+        </button>
       </div>
     </form>
   );
@@ -91,6 +98,7 @@ function PenaltyForm({ booking, onSaved }: { booking: Booking; onSaved: () => vo
   const [penaltyRuleId, setPenaltyRuleId] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   const rules = useAdminData(
     () => adminApi<PenaltyRule[]>("/admin/penalty-rules"),
@@ -105,6 +113,7 @@ function PenaltyForm({ booking, onSaved }: { booking: Booking; onSaved: () => vo
     }
     setError(null);
     try {
+      setPending(true);
       await adminApi(`/admin/bookings/${booking.id}/penalties`, {
         method: "POST",
         body: JSON.stringify({ penaltyRuleId, notes }),
@@ -114,10 +123,16 @@ function PenaltyForm({ booking, onSaved }: { booking: Booking; onSaved: () => vo
       setNotes("");
     } catch (error: unknown) {
       setError(errorMessage(error));
+    } finally {
+      setPending(false);
     }
   }
 
   const activeRules = rules.data ?? [];
+
+  if (!rules.loading && activeRules.length === 0) {
+    return null;
+  }
 
   return (
     <form className="card form-card" onSubmit={submit}>
@@ -147,7 +162,9 @@ function PenaltyForm({ booking, onSaved }: { booking: Booking; onSaved: () => vo
       </div>
       {error && <div className="error">{error}</div>}
       <div className="actions">
-        <button type="submit" className="button danger">Apply Penalty</button>
+        <button type="submit" className="button danger" disabled={pending || rules.loading}>
+          {pending ? "Applying..." : "Apply Penalty"}
+        </button>
       </div>
     </form>
   );
@@ -156,6 +173,7 @@ function PenaltyForm({ booking, onSaved }: { booking: Booking; onSaved: () => vo
 function AssignDriverForm({ booking, onSaved }: { booking: Booking; onSaved: () => void }) {
   const [driverId, setDriverId] = useState(booking.driver?.id || "");
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   const drivers = useAdminData(
     () => adminApi<Driver[]>("/admin/drivers?includeInactive=false"),
@@ -170,6 +188,7 @@ function AssignDriverForm({ booking, onSaved }: { booking: Booking; onSaved: () 
     }
     setError(null);
     try {
+      setPending(true);
       await adminApi(`/admin/bookings/${booking.id}/assign-driver`, {
         method: "POST",
         body: JSON.stringify({ driverId }),
@@ -177,6 +196,8 @@ function AssignDriverForm({ booking, onSaved }: { booking: Booking; onSaved: () 
       onSaved();
     } catch (error: unknown) {
       setError(errorMessage(error));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -200,26 +221,38 @@ function AssignDriverForm({ booking, onSaved }: { booking: Booking; onSaved: () 
       </div>
       {error && <div className="error">{error}</div>}
       <div className="actions">
-        <button type="submit" className="button secondary">Save Assignment</button>
+        <button type="submit" className="button secondary" disabled={pending}>
+          {pending ? "Saving..." : "Save Assignment"}
+        </button>
       </div>
     </form>
   );
 }
 
 function CompleteRideForm({ booking, onSaved }: { booking: Booking; onSaved: () => void }) {
-  const [actualEndTime, setActualEndTime] = useState(new Date().toISOString().slice(0, 16));
+  const timezone = useAdminUser()?.society.timezone ?? "Asia/Kolkata";
+  const [actualEndTime, setActualEndTime] = useState(
+    formatInTimeZone(new Date(), timezone, "yyyy-MM-dd'T'HH:mm"),
+  );
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     try {
+      setPending(true);
       await adminApi(`/admin/bookings/${booking.id}/complete`, {
         method: "POST",
-        body: JSON.stringify({ actualEndTime: new Date(actualEndTime).toISOString() }),
+        body: JSON.stringify({
+          actualEndTime: fromZonedTime(actualEndTime, timezone).toISOString(),
+        }),
       });
       onSaved();
     } catch (error: unknown) {
       setError(errorMessage(error));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -237,7 +270,9 @@ function CompleteRideForm({ booking, onSaved }: { booking: Booking; onSaved: () 
       </div>
       {error && <div className="error">{error}</div>}
       <div className="actions">
-        <button type="submit" className="button primary">Complete Ride</button>
+        <button type="submit" className="button primary" disabled={pending}>
+          {pending ? "Completing..." : "Complete Ride"}
+        </button>
       </div>
     </form>
   );
@@ -261,6 +296,7 @@ function InvoiceCard({ booking }: { booking: Booking }) {
 }
 
 export function BookingDetail({ id }: { id: string }) {
+  const timezone = useAdminUser()?.society.timezone ?? "Asia/Kolkata";
   const booking = useAdminData(
     () => adminApi<Booking>(`/admin/bookings/${id}`),
     [id],
@@ -285,10 +321,13 @@ export function BookingDetail({ id }: { id: string }) {
             <h2 className="panel-title">Reservation</h2>
             <Detail label="Resident" value={booking.data.user?.name ?? "Unknown"} />
             <Detail label="Flat" value={booking.data.flat?.number ?? "Unknown"} />
-            <Detail label="Vehicle" value={booking.data.vehicle.name} />
+            <Detail
+              label="Effective Vehicle"
+              value={(booking.data.reassignedVehicle ?? booking.data.vehicle).name}
+            />
             <Detail
               label="Registration"
-              value={booking.data.vehicle.registrationNumber}
+              value={(booking.data.reassignedVehicle ?? booking.data.vehicle).registrationNumber}
             />
             {booking.data.reassignedVehicle ? (
               <>
@@ -303,33 +342,43 @@ export function BookingDetail({ id }: { id: string }) {
             <div>
               <StatusPill value={booking.data.effectiveStatus} />
             </div>
-            <Detail label="Start Time" value={dateTime(booking.data.startTime)} />
-            <Detail label="End Time" value={dateTime(booking.data.endTime)} />
+            <Detail label="Start Time" value={dateTime(booking.data.startTime, timezone)} />
+            <Detail label="End Time" value={dateTime(booking.data.endTime, timezone)} />
             {booking.data.actualRideStartTime ? (
-              <Detail label="Actual Start Time" value={dateTime(booking.data.actualRideStartTime)} />
+              <Detail label="Actual Start Time" value={dateTime(booking.data.actualRideStartTime, timezone)} />
             ) : null}
             {booking.data.actualEndTime ? (
-              <Detail label="Actual End Time" value={dateTime(booking.data.actualEndTime)} />
+              <Detail label="Actual End Time" value={dateTime(booking.data.actualEndTime, timezone)} />
             ) : null}
             {booking.data.otpVerifiedAt ? (
-              <Detail label="OTP Verified At" value={dateTime(booking.data.otpVerifiedAt)} />
+              <Detail label="OTP Verified At" value={dateTime(booking.data.otpVerifiedAt, timezone)} />
             ) : null}
             {booking.data.driver ? (
               <Detail label="Assigned Driver" value={`${booking.data.driver.fullName} (${booking.data.driver.phoneNumber})`} />
             ) : null}
-            <Detail label="Created Date" value={dateTime(booking.data.createdAt)} />
+            <Detail label="Created Date" value={dateTime(booking.data.createdAt, timezone)} />
             <Detail label="Booking ID" value={booking.data.id} />
           </div>
-          {(booking.data.effectiveStatus === "IN_PROGRESS" || booking.data.effectiveStatus === "ACTIVE" || booking.data.effectiveStatus === "BOOKED") ? (
+          {booking.data.effectiveStatus === "IN_PROGRESS" ? (
             <CompleteRideForm booking={booking.data} onSaved={() => booking.reload()} />
           ) : null}
           {booking.data.invoice ? (
             <InvoiceCard booking={booking.data} />
           ) : null}
-          {booking.data.effectiveStatus !== "COMPLETED" && booking.data.effectiveStatus !== "CANCELLED" ? (
+          {[
+            "BOOKED",
+            "DRIVER_ASSIGNED",
+            "REASSIGNED",
+            "AT_RISK",
+          ].includes(booking.data.effectiveStatus) ? (
             <AssignDriverForm booking={booking.data} onSaved={() => booking.reload()} />
           ) : null}
-          {booking.data.effectiveStatus !== "COMPLETED" && booking.data.effectiveStatus !== "CANCELLED" ? (
+          {[
+            "BOOKED",
+            "DRIVER_ASSIGNED",
+            "REASSIGNED",
+            "AT_RISK",
+          ].includes(booking.data.effectiveStatus) ? (
             <ReassignForm booking={booking.data} onSaved={() => booking.reload()} />
           ) : null}
           <PenaltyForm booking={booking.data} onSaved={() => booking.reload()} />
@@ -352,7 +401,7 @@ export function BookingDetail({ id }: { id: string }) {
                   <tbody>
                     {booking.data.reassignmentLogs.map((log) => (
                       <tr key={log.id}>
-                        <td>{dateTime(log.createdAt)}</td>
+                        <td>{dateTime(log.createdAt, timezone)}</td>
                         <td>{log.originalVehicle.name}</td>
                         <td>{log.newVehicle.name}</td>
                         <td>{log.reason}</td>

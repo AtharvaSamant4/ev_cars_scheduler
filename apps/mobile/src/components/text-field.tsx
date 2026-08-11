@@ -6,6 +6,7 @@ import {
   View,
   type TextInputProps,
 } from "react-native";
+import type { ChangeEvent, CSSProperties } from "react";
 
 import { colors, radius, spacing } from "@/src/theme";
 
@@ -38,9 +39,11 @@ export function TextField({ label, hint, style, type, ...props }: TextFieldProps
             boxSizing: "border-box",
             outline: "none",
             fontFamily: "inherit",
-          } as any}
+          } satisfies CSSProperties}
           value={props.value}
-          onChange={(e: any) => props.onChangeText?.(e.target.value)}
+          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+            props.onChangeText?.(event.target.value)
+          }
           placeholder={props.placeholder}
         />
       ) : (

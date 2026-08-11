@@ -14,9 +14,10 @@ if (-not $configuration) {
 
 $ipAddress = $configuration.IPv4Address.IPAddress
 $env:REACT_NATIVE_PACKAGER_HOSTNAME = $ipAddress
+$env:EXPO_PUBLIC_API_URL = "http://${ipAddress}:3000/api/v1"
 
 Write-Host "Expo LAN host: $ipAddress"
 Write-Host "Metro status URL: http://${ipAddress}:8081/status"
-Write-Host "Backend API URL should be: http://${ipAddress}:3000/api/v1"
+Write-Host "Backend API URL: $env:EXPO_PUBLIC_API_URL"
 
 pnpm exec expo start --host lan

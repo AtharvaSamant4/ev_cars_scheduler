@@ -124,14 +124,28 @@ export async function currentQuotaWeek(societyId: string) {
 export async function getNotifications(user: AuthUser) {
   return prisma.notification.findMany({
     where: { userId: user.id },
+    select: {
+      id: true,
+      title: true,
+      message: true,
+      read: true,
+      createdAt: true,
+    },
     orderBy: { createdAt: "desc" },
     take: 50,
   });
 }
 
-export async function markNotificationsRead(user: AuthUser) {
+export async function markNotificationsRead(
+  user: AuthUser,
+  notificationIds: string[],
+) {
   return prisma.notification.updateMany({
-    where: { userId: user.id, read: false },
+    where: {
+      id: { in: notificationIds },
+      userId: user.id,
+      read: false,
+    },
     data: { read: true },
   });
 }

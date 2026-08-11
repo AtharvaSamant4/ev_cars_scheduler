@@ -27,8 +27,10 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isDriver, setIsDriver] = useState(false);
+  const pending = login.isPending || driverLoginQuery.isPending;
 
   const submit = async () => {
+    if (pending) return;
     setMessage(null);
 
     try {
@@ -103,23 +105,13 @@ export default function LoginScreen() {
           />
           {message ? <Text style={styles.error}>{message}</Text> : null}
           <Button
-            disabled={!flatNumber.trim() || password.length < 8}
+            disabled={pending || !flatNumber.trim() || password.length < 8}
             label="Login"
-            loading={login.isPending || driverLoginQuery.isPending}
+            loading={pending}
             onPress={() => void submit()}
           />
-          {!isDriver && (
-            <Button
-              label="Use demo account"
-              variant="secondary"
-              onPress={() => {
-                setFlatNumber("A101");
-                setPassword("Demo@123");
-                setMessage(null);
-              }}
-            />
-          )}
           <Button
+            disabled={pending}
             label={isDriver ? "Switch to Resident" : "Login as Driver"}
             variant="secondary"
             onPress={() => {

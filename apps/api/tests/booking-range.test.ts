@@ -45,16 +45,18 @@ describe("normalizeBookingRange", () => {
     ).toThrowError(/30-minute boundaries/);
   });
 
-  it("rejects bookings that cross calendar years", () => {
-    expect(() =>
-      normalizeBookingRange(
-        "2030-12-31T23:00:00+05:30",
-        "2031-01-01T01:00:00+05:30",
-        timezone,
-        UserRole.RESIDENT,
-        new Date("2030-12-30T00:00:00Z"),
-      ),
-    ).toThrowError(/calendar-year boundary/);
+  it("allows a year-crossing booking and charges the ISO week containing its start", () => {
+    const result = normalizeBookingRange(
+      "2030-12-31T23:00:00+05:30",
+      "2031-01-01T01:00:00+05:30",
+      timezone,
+      UserRole.RESIDENT,
+      new Date("2030-12-30T00:00:00Z"),
+    );
+
+    expect(result.durationMinutes).toBe(120);
+    expect(result.quotaYear).toBe(2031);
+    expect(result.quotaWeek).toBe(1);
   });
 
   describe("7-day rolling window", () => {

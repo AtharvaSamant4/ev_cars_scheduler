@@ -1,7 +1,7 @@
 # Resident Mobile App
 
-Expo Router application for society residents to view quota, reserve an EV,
-review bookings, cancel future reservations, and log out.
+Expo Router application for society residents and drivers to manage the shared
+EV booking and ride workflow.
 
 ## Configure
 
@@ -42,10 +42,13 @@ Password: Demo@123
 ## Screens
 
 - Resident login
-- Dashboard with annual quota and upcoming bookings
+- Dashboard with weekly quota and upcoming bookings
 - Book vehicle with availability check
 - Upcoming and historical bookings
-- Booking details with cancellation
+- Booking details with cancellation, ride OTP, and invoice download
+- Wallet ledger and local demo recharge QR
+- Notifications
+- Driver dashboard, OTP ride start, completion, and trip history
 - Logout confirmation
 
 ## API Integrations

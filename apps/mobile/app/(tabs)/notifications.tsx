@@ -1,10 +1,13 @@
 import { useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { EmptyState, LoadingState } from "@/src/components/states";
-import { apiRequest } from "@/src/lib/api";
+import { Button } from "@/src/components/button";
+import { EmptyState, ErrorState, LoadingState } from "@/src/components/states";
+import { apiRequest, errorMessage } from "@/src/lib/api";
+import { bookingDate, bookingTime } from "@/src/lib/format";
+import { useAuthStore } from "@/src/store/auth";
 import { colors, fonts, shadows } from "@/src/theme";
 import type { Notification } from "@/src/types/api";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,16 +16,44 @@ export default function NotificationsTab() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestInFlight = useRef(false);
+  const timezone =
+    useAuthStore((state) => state.user?.society.timezone) ?? "Asia/Kolkata";
 
   const fetchNotifications = useCallback(async () => {
+    if (requestInFlight.current) return;
+
+    requestInFlight.current = true;
+    setLoadError(null);
     try {
       const data = await apiRequest<Notification[]>("/notifications");
       setNotifications(data);
-      // Mark as read in the background
-      await apiRequest("/notifications", { method: "POST" }).catch(() => null);
+      if (data.length > 0) {
+        try {
+          const shownIds = data.map((notification) => notification.id);
+          await apiRequest<{ success: boolean }>("/notifications", {
+            method: "POST",
+            body: JSON.stringify({ notificationIds: shownIds }),
+          });
+          const shownIdSet = new Set(shownIds);
+          setNotifications((current) =>
+            current.map((notification) =>
+              shownIdSet.has(notification.id)
+                ? { ...notification, read: true }
+                : notification,
+            ),
+          );
+        } catch (error) {
+          setLoadError(
+            `Alerts loaded, but read status could not be updated: ${errorMessage(error)}`,
+          );
+        }
+      }
     } catch (error) {
-      console.error(error);
+      setLoadError(errorMessage(error));
     } finally {
+      requestInFlight.current = false;
       setLoading(false);
       setRefreshing(false);
     }
@@ -35,12 +66,22 @@ export default function NotificationsTab() {
   );
 
   const onRefresh = () => {
+    if (requestInFlight.current) return;
     setRefreshing(true);
     void fetchNotifications();
   };
 
   if (loading) {
     return <LoadingState label="Loading alerts..." />;
+  }
+
+  if (loadError && notifications.length === 0) {
+    return (
+      <ErrorState
+        message={loadError}
+        onRetry={() => void fetchNotifications()}
+      />
+    );
   }
 
   return (
@@ -54,6 +95,16 @@ export default function NotificationsTab() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
+        {loadError ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>{loadError}</Text>
+            <Button
+              label="Try again"
+              variant="secondary"
+              onPress={() => void fetchNotifications()}
+            />
+          </View>
+        ) : null}
         {notifications.length === 0 ? (
           <EmptyState
             title="No alerts"
@@ -79,7 +130,8 @@ export default function NotificationsTab() {
                 <Text style={styles.notificationTitle}>{notification.title}</Text>
                 <Text style={styles.notificationMessage}>{notification.message}</Text>
                 <Text style={styles.notificationTime}>
-                  {new Date(notification.createdAt).toLocaleString()}
+                  {bookingDate(notification.createdAt, timezone)} ·{" "}
+                  {bookingTime(notification.createdAt, timezone)}
                 </Text>
               </View>
               {!notification.read && <View style={styles.unreadDot} />}
@@ -151,5 +203,17 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     marginTop: 8,
     width: 8,
+  },
+  errorBanner: {
+    backgroundColor: colors.dangerSoft,
+    borderRadius: 12,
+    gap: 12,
+    marginBottom: 12,
+    padding: 12,
+  },
+  errorText: {
+    color: colors.danger,
+    fontFamily: fonts.medium,
+    fontSize: 14,
   },
 });

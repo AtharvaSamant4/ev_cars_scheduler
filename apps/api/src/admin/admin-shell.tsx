@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useState } from "react";
+import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 
 import { adminApi } from "./api";
 import type { AdminUser } from "./types";
@@ -22,6 +22,12 @@ const navItems = [
   ["cancellation-settings", "Cancellation Settings"],
   ["affected-bookings", "Affected Bookings"],
 ] as const;
+
+const AdminUserContext = createContext<AdminUser | null>(null);
+
+export function useAdminUser() {
+  return useContext(AdminUserContext);
+}
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -74,6 +80,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   }
 
   return (
+    <AdminUserContext.Provider value={user}>
     <div className="admin-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
@@ -106,6 +113,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
       </aside>
       <main className="content">{children}</main>
     </div>
+    </AdminUserContext.Provider>
   );
 }
 

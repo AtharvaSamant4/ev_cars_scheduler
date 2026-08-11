@@ -5,7 +5,19 @@
 ## Start
 
 1. Start the existing local database: `docker start society-ev-recovery-pg`
-2. Reconcile demo data: `pnpm db:deploy` then `pnpm db:seed`
+2. In the same PowerShell session, explicitly select the isolated local demo database (do not skip this):
+
+   ```powershell
+   $recoveryEnv = docker inspect society-ev-recovery-pg --format '{{range .Config.Env}}{{println .}}{{end}}'
+   $recoveryPassword = ($recoveryEnv | Where-Object { $_ -like 'POSTGRES_PASSWORD=*' } | Select-Object -First 1).Substring('POSTGRES_PASSWORD='.Length)
+   $encodedPassword = [Uri]::EscapeDataString($recoveryPassword)
+   $localDatabaseUrl = "postgresql://society_ev_recovery:${encodedPassword}@127.0.0.1:55432/society_ev_recovery_demo_ready"
+   $env:DATABASE_URL = $localDatabaseUrl
+   $env:DIRECT_URL = $localDatabaseUrl
+   pnpm db:demo:prepare
+   ```
+
+   The combined command checks the target before migration, and the seed checks it again before creating a Prisma client. It refuses Neon and every non-recovery database.
 3. Start the LAN API: `pnpm --filter @society-ev/api exec next dev -H 0.0.0.0 -p 3000`
 4. Start Expo for a phone: `pnpm mobile:start`
 5. For a local web demo instead: `pnpm --filter @society-ev/mobile exec expo start --web --offline --port 8081`

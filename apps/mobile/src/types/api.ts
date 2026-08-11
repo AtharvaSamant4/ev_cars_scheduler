@@ -1,5 +1,19 @@
 export type BookingStatus = "BOOKED" | "DRIVER_ASSIGNED" | "OTP_PENDING" | "IN_PROGRESS" | "ACTIVE" | "COMPLETED" | "CANCELLED" | "REASSIGNED" | "AT_RISK";
 
+export type VehicleStatus =
+  | "AVAILABLE"
+  | "MAINTENANCE"
+  | "INACTIVE"
+  | "BREAKDOWN";
+
+export type TransactionType =
+  | "CREDIT"
+  | "DEBIT"
+  | "BOOKING_DEBIT"
+  | "REFUND"
+  | "PENALTY"
+  | "RECHARGE";
+
 type SessionUserBase = {
   id: string;
   name: string;
@@ -45,6 +59,10 @@ export type VehicleSummary = {
   registrationNumber: string;
 };
 
+export type DriverVehicle = VehicleSummary & {
+  status: VehicleStatus;
+};
+
 export type Booking = {
   id: string;
   quotaYear?: number;
@@ -87,6 +105,55 @@ export type Notification = {
   message: string;
   read: boolean;
   createdAt: string;
+};
+
+export type DriverTrip = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  status: BookingStatus;
+  effectiveStatus?: BookingStatus;
+  user: {
+    name: string;
+    phone?: string | null;
+  };
+  flat: {
+    number: string;
+  };
+  effectiveVehicle: DriverVehicle;
+};
+
+export type DriverDashboard = {
+  vehicle: DriverVehicle | null;
+  today: DriverTrip[];
+  upcoming: DriverTrip[];
+};
+
+export type DriverBookingActionResult = {
+  id: string;
+  status: BookingStatus;
+  effectiveStatus: BookingStatus;
+};
+
+export type WalletTransaction = {
+  id: string;
+  amount: number;
+  type: TransactionType;
+  description: string;
+  bookingId?: string | null;
+  createdAt: string;
+};
+
+export type Wallet = {
+  id: string;
+  userId: string;
+  balance: number;
+  transactions: WalletTransaction[];
+};
+
+export type InvoiceDownloadToken = {
+  downloadToken: string | null;
+  available: boolean;
 };
 
 export type Dashboard = {

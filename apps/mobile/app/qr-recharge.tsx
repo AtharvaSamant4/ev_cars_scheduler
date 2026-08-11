@@ -1,46 +1,76 @@
-import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Redirect, useRouter } from "expo-router";
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, View, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Button } from "@/src/components/button";
 import { Card } from "@/src/components/card";
+import { LoadingState } from "@/src/components/states";
+import { queryKeys } from "@/src/api/hooks";
+import { notify } from "@/src/lib/alerts";
 import { apiRequest, errorMessage } from "@/src/lib/api";
+import { useAuthStore } from "@/src/store/auth";
 import { colors, fonts, radius, spacing } from "@/src/theme";
+import type { Wallet } from "@/src/types/api";
 
 export default function QRRechargeScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [amount, setAmount] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const hydrated = useAuthStore((state) => state.hydrated);
+  const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
 
   const presetAmounts = [500, 1000, 2000];
 
   const submitRecharge = async () => {
+    if (isSubmitting) return;
+
     const numericAmount = Number(amount);
-    if (!amount || isNaN(numericAmount) || numericAmount <= 0) {
-      alert("Please enter a valid amount.");
+    if (
+      !amount.trim() ||
+      !Number.isInteger(numericAmount) ||
+      numericAmount <= 0
+    ) {
+      notify("Invalid amount", "Enter a positive whole-rupee amount.");
       return;
     }
     if (numericAmount > 10000) {
-      alert("Maximum demo recharge is ₹10000.");
+      notify("Invalid amount", "Maximum demo recharge is ₹10,000.");
       return;
     }
 
     setIsSubmitting(true);
     try {
-      await apiRequest("/wallet/mock-recharge", {
+      await apiRequest<Wallet>("/wallet/mock-recharge", {
         method: "POST",
         body: JSON.stringify({
           amount: numericAmount,
         }),
       });
-      alert("Demo recharge successful!");
+      await queryClient.invalidateQueries({ queryKey: queryKeys.wallet });
+      notify("Recharge successful", "The demo funds were added to your wallet.");
       router.back();
     } catch (err) {
-      alert(errorMessage(err));
+      notify("Recharge failed", errorMessage(err));
+    } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (!hydrated) {
+    return <LoadingState label="Preparing demo recharge..." />;
+  }
+
+  if (!token || !user) {
+    return <Redirect href="/(auth)/login" />;
+  }
+
+  if (user.role !== "RESIDENT") {
+    return <Redirect href="/(driver)" />;
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -64,6 +94,7 @@ export default function QRRechargeScreen() {
             keyboardType="numeric"
             value={amount}
             onChangeText={setAmount}
+            editable={!isSubmitting}
             placeholder="e.g. 500"
             placeholderTextColor={colors.textMuted}
           />
@@ -72,7 +103,8 @@ export default function QRRechargeScreen() {
             {presetAmounts.map((preset) => (
               <TouchableOpacity
                 key={preset}
-                style={styles.presetChip}
+                disabled={isSubmitting}
+                style={[styles.presetChip, isSubmitting && styles.disabled]}
                 onPress={() => setAmount(preset.toString())}
               >
                 <Text style={styles.presetText}>₹{preset}</Text>
@@ -84,6 +116,7 @@ export default function QRRechargeScreen() {
             label="Confirm Payment"
             onPress={submitRecharge}
             loading={isSubmitting}
+            disabled={isSubmitting}
             style={{ marginTop: spacing.md }}
           />
         </Card>
@@ -156,5 +189,8 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontFamily: fonts.bold,
     fontSize: 16,
+  },
+  disabled: {
+    opacity: 0.55,
   },
 });

@@ -1,3 +1,5 @@
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+
 export function hours(minutes: number) {
   const value = minutes / 60;
   return `${Number.isInteger(value) ? value : value.toFixed(1)} hrs`;
@@ -15,20 +17,31 @@ export function minutesFromHours(value: string) {
   return Math.round(Number(value) * 60);
 }
 
-export function dateTime(value: string) {
+export function dateTime(value: string, timeZone = "Asia/Kolkata") {
   return new Intl.DateTimeFormat("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "Asia/Kolkata",
+    timeZone,
   }).format(new Date(value));
 }
 
-export function dateInputToIso(value: string, endOfDay = false) {
+export function dateInputToIso(
+  value: string,
+  endOfDay = false,
+  timeZone = "Asia/Kolkata",
+) {
   if (!value) {
     return undefined;
   }
 
-  return `${value}T${endOfDay ? "23:59:59" : "00:00:00"}+05:30`;
+  return fromZonedTime(
+    `${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`,
+    timeZone,
+  ).toISOString();
+}
+
+export function dateInputValue(value: string, timeZone = "Asia/Kolkata") {
+  return formatInTimeZone(value, timeZone, "yyyy-MM-dd");
 }
 
 export function statusClass(status: string) {

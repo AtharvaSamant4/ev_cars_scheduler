@@ -1,25 +1,26 @@
 import type { NextConfig } from "next";
 import os from "os";
 
-// Automatically find the laptop's Wi-Fi IP address
-function getLocalIp() {
+// Permit every active local IPv4 interface in development. Windows can expose
+// Docker/VPN adapters before Wi-Fi, so selecting only the first address makes
+// physical-phone demos fail unpredictably.
+function getLocalIps() {
   const interfaces = os.networkInterfaces();
+  const addresses = new Set<string>();
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]!) {
-      // Return the first external IPv4 address
       if (iface.family === "IPv4" && !iface.internal) {
-        return iface.address;
+        addresses.add(iface.address);
       }
     }
   }
-  return null;
+  return [...addresses];
 }
 
-const currentIp = getLocalIp();
 const allowedDevOrigins = [
   "127.0.0.1",
   "localhost",
-  ...(currentIp ? [currentIp] : []),
+  ...getLocalIps(),
 ];
 
 const nextConfig: NextConfig = {

@@ -2,7 +2,7 @@ import { ReassignReason, UserRole } from "@society-ev/db";
 import { z } from "zod";
 
 import { requireAuth } from "@/src/lib/auth";
-import { apiRoute, ok } from "@/src/lib/http";
+import { apiRoute, ok, parseBody, routeId } from "@/src/lib/http";
 import { reassignBooking } from "@/src/modules/bookings/service";
 
 export const runtime = "nodejs";
@@ -13,10 +13,10 @@ const reassignSchema = z.object({
   reason: z.nativeEnum(ReassignReason),
 });
 
-export const POST = apiRoute(async (req, { params }) => {
+export const POST = apiRoute(async (req, context) => {
   const user = await requireAuth(req, UserRole.ADMIN);
-  const body = reassignSchema.parse(await req.json());
-  const { id } = await params;
+  const body = await parseBody(req, reassignSchema);
+  const id = await routeId(context);
 
   const result = await reassignBooking(
     user,

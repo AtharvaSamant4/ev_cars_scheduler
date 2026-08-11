@@ -1,12 +1,22 @@
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
-import { StyleSheet, Text, View } from "react-native";
+import {
+  Redirect,
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
+} from "expo-router";
+import { useCallback, useState } from "react";
+import { Linking, StyleSheet, Text, View } from "react-native";
 
-import { useBooking, useCancelBooking } from "@/src/api/hooks";
+import {
+  useBooking,
+  useCancelBooking,
+  useInvoiceDownloadToken,
+} from "@/src/api/hooks";
 import { Button } from "@/src/components/button";
 import { Card } from "@/src/components/card";
 import { ErrorState, LoadingState } from "@/src/components/states";
 import { Screen } from "@/src/components/screen";
-import { apiBaseUrl, errorMessage } from "@/src/lib/api";
+import { buildApiUrl, errorMessage } from "@/src/lib/api";
 import { confirmAction, notify } from "@/src/lib/alerts";
 import {
   bookingDate,
@@ -27,6 +37,17 @@ export default function BookingDetailsScreen() {
     useAuthStore((state) => state.user?.society.timezone) ?? "Asia/Kolkata";
   const booking = useBooking(id, user?.role === "RESIDENT");
   const cancellation = useCancelBooking(id);
+  const invoiceDownload = useInvoiceDownloadToken(id);
+  const refetchBooking = booking.refetch;
+  const [cancellationPromptOpen, setCancellationPromptOpen] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (id && user?.role === "RESIDENT") {
+        void refetchBooking();
+      }
+    }, [id, refetchBooking, user?.role]),
+  );
 
   if (!token || !user) {
     return <Redirect href="/(auth)/login" />;
@@ -50,26 +71,53 @@ export default function BookingDetailsScreen() {
   }
 
   const canCancel =
-    (booking.data.status === "BOOKED" || booking.data.status === "AT_RISK") &&
+    ["BOOKED", "DRIVER_ASSIGNED", "REASSIGNED", "AT_RISK"].includes(
+      booking.data.status,
+    ) &&
     new Date(booking.data.startTime) > new Date();
   const vehicle = booking.data.reassignedVehicle ?? booking.data.vehicle;
 
   const confirmCancellation = () => {
+    if (cancellation.isPending || cancellationPromptOpen) return;
+
+    setCancellationPromptOpen(true);
     confirmAction({
       title: "Cancel this booking?",
       message: "Your quota will be restored and any active cancellation penalty will be applied to your wallet.",
       confirmLabel: "Cancel booking",
       cancelLabel: "Keep booking",
       destructive: true,
+      onCancel: () => setCancellationPromptOpen(false),
       onConfirm: async () => {
         try {
           await cancellation.mutateAsync();
           notify("Booking cancelled", "Your quota was restored and your wallet was updated.");
         } catch (error) {
           notify("Could not cancel", errorMessage(error));
+        } finally {
+          setCancellationPromptOpen(false);
         }
       },
     });
+  };
+
+  const downloadInvoice = async () => {
+    if (invoiceDownload.isPending) return;
+
+    try {
+      const result = await invoiceDownload.mutateAsync();
+      if (!result.available || !result.downloadToken) {
+        throw new Error("The invoice is not available for download yet");
+      }
+
+      await Linking.openURL(
+        buildApiUrl(`/bookings/${encodeURIComponent(booking.data.id)}/invoice/pdf`, {
+          downloadToken: result.downloadToken,
+        }),
+      );
+    } catch (error) {
+      notify("Could not download invoice", errorMessage(error));
+    }
   };
 
   return (
@@ -138,6 +186,7 @@ export default function BookingDetailsScreen() {
         <Button
           label="Cancel booking"
           loading={cancellation.isPending}
+          disabled={cancellation.isPending || cancellationPromptOpen}
           variant="danger"
           onPress={confirmCancellation}
         />
@@ -147,10 +196,9 @@ export default function BookingDetailsScreen() {
         <Button
           label="Download Invoice PDF"
           variant="primary"
-          onPress={() => {
-            const url = `${apiBaseUrl}/bookings/${booking.data.id}/invoice/pdf?token=${token}`;
-            import('react-native').then(rn => rn.Linking.openURL(url));
-          }}
+          loading={invoiceDownload.isPending}
+          disabled={invoiceDownload.isPending}
+          onPress={() => void downloadInvoice()}
         />
       ) : null}
 

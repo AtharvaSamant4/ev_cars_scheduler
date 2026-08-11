@@ -23,7 +23,8 @@ import { colors, radius, spacing } from "@/src/theme";
 export default function BookVehicleScreen() {
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
-  const defaults = useMemo(() => defaultBookingFields(), []);
+  const timezone = user?.society.timezone ?? "Asia/Kolkata";
+  const defaults = useMemo(() => defaultBookingFields(timezone), [timezone]);
   const [date, setDate] = useState(defaults.date);
   const [startTime, setStartTime] = useState(defaults.startTime);
   const [endTime, setEndTime] = useState(defaults.endTime);
@@ -32,7 +33,6 @@ export default function BookVehicleScreen() {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const availability = useCheckAvailability();
   const createBooking = useCreateBooking();
-  const timezone = user?.society.timezone ?? "Asia/Kolkata";
 
   const currentRange = () => bookingRange(date, startTime, endTime, timezone);
 

@@ -5,19 +5,22 @@ import {
   Prisma,
   prisma,
   RechargeRequestStatus,
+  TransactionType,
   UserRole,
   VehicleStatus,
 } from "@society-ev/db";
 
 import type { AuthUser } from "@/src/lib/auth";
+import { formatDateInTimezone } from "@/src/lib/date";
 import { AppError } from "@/src/lib/errors";
 import { paginated, pagination } from "@/src/lib/pagination";
-import { bookingResponse } from "@/src/modules/bookings/service";
+import { bookingResponseWithoutOtp } from "@/src/modules/bookings/service";
 import { currentQuotaYear, currentQuotaWeek } from "@/src/modules/residents/service";
 import {
   currentQuotaPeriods,
   WEEKLY_QUOTA_MINUTES,
 } from "@/src/modules/quotas/service";
+import { creditWallet } from "@/src/modules/wallet/service";
 
 export async function adminDashboard(user: AuthUser) {
   const now = new Date();
@@ -47,8 +50,16 @@ export async function adminDashboard(user: AuthUser) {
     prisma.booking.count({
       where: {
         societyId: user.societyId,
-        status: BookingStatus.BOOKED,
-        startTime: { gt: now },
+        status: {
+          in: [
+            BookingStatus.BOOKED,
+            BookingStatus.DRIVER_ASSIGNED,
+            BookingStatus.OTP_PENDING,
+            BookingStatus.REASSIGNED,
+            BookingStatus.AT_RISK,
+          ],
+        },
+        endTime: { gt: now },
       },
     }),
   ]);
@@ -97,6 +108,9 @@ export async function createVehicle(
     registrationNumber: string;
     status?: VehicleStatus;
     isReserve?: boolean;
+    hourlyRate?: number;
+    maintenanceReason?: string;
+    expectedReturnDate?: string;
   },
 ) {
   return prisma.vehicle.create({
@@ -106,6 +120,11 @@ export async function createVehicle(
       registrationNumber: input.registrationNumber.toUpperCase(),
       status: input.status,
       isReserve: input.isReserve,
+      hourlyRate: input.hourlyRate,
+      maintenanceReason: input.maintenanceReason,
+      expectedReturnDate: input.expectedReturnDate
+        ? new Date(input.expectedReturnDate)
+        : undefined,
     },
   });
 }
@@ -130,47 +149,98 @@ export async function updateVehicle(
     registrationNumber?: string;
     status?: VehicleStatus;
     isReserve?: boolean;
+    hourlyRate?: number;
     maintenanceReason?: string;
     expectedReturnDate?: string;
   },
 ) {
-  const vehicle = await getVehicle(user, id);
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
+    const vehicles = await tx.$queryRaw<Array<{
+      id: string;
+      name: string;
+      status: VehicleStatus;
+    }>>`
+      SELECT "id", "name", "status"
+      FROM "Vehicle"
+      WHERE "id" = ${id}::uuid
+        AND "societyId" = ${user.societyId}::uuid
+      FOR UPDATE
+    `;
+    const vehicle = vehicles[0];
+    if (!vehicle) {
+      throw new AppError(404, "NOT_FOUND", "Vehicle not found");
+    }
+
     const updated = await tx.vehicle.update({
       where: { id },
       data: {
         ...input,
         registrationNumber: input.registrationNumber?.toUpperCase(),
-        expectedReturnDate: input.expectedReturnDate ? new Date(input.expectedReturnDate) : undefined,
+        maintenanceReason: input.status === VehicleStatus.AVAILABLE
+          ? null
+          : input.maintenanceReason,
+        expectedReturnDate: input.status === VehicleStatus.AVAILABLE
+          ? null
+          : input.expectedReturnDate
+            ? new Date(input.expectedReturnDate)
+            : undefined,
       },
     });
 
     if (
-      (input.status === "MAINTENANCE" || input.status === "BREAKDOWN") &&
+      (
+        input.status === VehicleStatus.MAINTENANCE ||
+        input.status === VehicleStatus.BREAKDOWN ||
+        input.status === VehicleStatus.INACTIVE
+      ) &&
       vehicle.status !== input.status
     ) {
       const affectedBookings = await tx.booking.findMany({
         where: {
-          vehicleId: id,
+          societyId: user.societyId,
+          OR: [
+            { reassignedVehicleId: id },
+            { vehicleId: id, reassignedVehicleId: null },
+          ],
           startTime: { gt: now },
-          status: "BOOKED",
+          status: {
+            in: [
+              BookingStatus.BOOKED,
+              BookingStatus.DRIVER_ASSIGNED,
+              BookingStatus.OTP_PENDING,
+              BookingStatus.REASSIGNED,
+            ],
+          },
         },
         include: { user: true },
       });
 
       if (affectedBookings.length > 0) {
+        const society = await tx.society.findUniqueOrThrow({
+          where: { id: user.societyId },
+          select: { timezone: true },
+        });
+
         await tx.booking.updateMany({
           where: { id: { in: affectedBookings.map((b) => b.id) } },
-          data: { status: "AT_RISK" },
+          data: {
+            status: BookingStatus.AT_RISK,
+            otp: null,
+            otpGeneratedAt: null,
+            otpExpiresAt: null,
+            otpAttempts: 0,
+            otpVerified: false,
+            otpVerifiedAt: null,
+          },
         });
 
         await tx.notification.createMany({
           data: affectedBookings.map((b) => ({
             userId: b.userId,
             title: "Booking Impacted",
-            message: `Your assigned EV (${vehicle.name}) is under maintenance. Your booking on ${b.startTime.toLocaleDateString()} may be impacted.`,
+            message: `Your assigned EV (${updated.name}) is unavailable. Your booking on ${formatDateInTimezone(b.startTime, society.timezone)} may be impacted.`,
           })),
         });
       }
@@ -303,12 +373,21 @@ export async function updateFlat(
   input: { number?: string; isActive?: boolean },
 ) {
   await getFlat(user, id);
-  return prisma.flat.update({
-    where: { id },
-    data: {
-      ...input,
-      number: input.number?.toUpperCase(),
-    },
+  return prisma.$transaction(async (tx) => {
+    if (input.isActive === false) {
+      await tx.user.updateMany({
+        where: { flatId: id, societyId: user.societyId, role: UserRole.RESIDENT },
+        data: { isActive: false },
+      });
+    }
+
+    return tx.flat.update({
+      where: { id },
+      data: {
+        ...input,
+        number: input.number?.toUpperCase(),
+      },
+    });
   });
 }
 
@@ -335,36 +414,38 @@ export async function updateQuota(
   weekNumber: number,
   allocatedMinutes: number,
 ) {
-  const flat = await prisma.flat.findFirst({
-    where: { id: flatId, societyId: user.societyId },
-    select: { id: true },
-  });
+  return prisma.$transaction(async (tx) => {
+    const flats = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "Flat"
+      WHERE "id" = ${flatId}::uuid
+        AND "societyId" = ${user.societyId}::uuid
+      FOR UPDATE
+    `;
 
-  if (!flat) {
-    throw new AppError(404, "NOT_FOUND", "Flat not found");
-  }
+    if (!flats[0]) {
+      throw new AppError(404, "NOT_FOUND", "Flat not found");
+    }
 
-  const existing = await prisma.flatQuota.findUnique({
-    where: { flatId_year_weekNumber: { flatId, year, weekNumber } },
-  });
+    const locked = await tx.$queryRaw<{ id: string; usedMinutes: number }[]>`
+      SELECT "id", "usedMinutes" FROM "FlatQuota"
+      WHERE "flatId" = ${flatId}::uuid
+        AND "year" = ${year}
+        AND "weekNumber" = ${weekNumber}
+      FOR UPDATE
+    `;
+    const existing = locked[0];
 
-  if (existing && allocatedMinutes < existing.usedMinutes) {
-    throw new AppError(
-      409,
-      "QUOTA_BELOW_USAGE",
-      "Allocated quota cannot be lower than used quota",
-    );
-  }
+    if (existing && allocatedMinutes < existing.usedMinutes) {
+      throw new AppError(
+        409,
+        "QUOTA_BELOW_USAGE",
+        "Allocated quota cannot be lower than used quota",
+      );
+    }
 
-  return prisma.flatQuota.upsert({
-    where: { flatId_year_weekNumber: { flatId, year, weekNumber } },
-    update: { allocatedMinutes },
-    create: {
-      flatId,
-      year,
-      weekNumber,
-      allocatedMinutes,
-    },
+    return existing
+      ? tx.flatQuota.update({ where: { id: existing.id }, data: { allocatedMinutes } })
+      : tx.flatQuota.create({ data: { flatId, year, weekNumber, allocatedMinutes } });
   });
 }
 
@@ -437,6 +518,7 @@ export async function createResident(
     );
   }
 
+  const passwordHash = await hash(input.password, 12);
   return prisma.user.create({
     data: {
       societyId: user.societyId,
@@ -444,7 +526,19 @@ export async function createResident(
       role: UserRole.RESIDENT,
       name: input.name,
       phone: input.phone,
-      passwordHash: await hash(input.password, 12),
+      passwordHash,
+      wallet: {
+        create: {
+          balance: 5000,
+          transactions: {
+            create: {
+              amount: 5000,
+              type: "CREDIT",
+              description: "Initial Promotional Balance",
+            },
+          },
+        },
+      },
     },
     select: {
       id: true,
@@ -533,24 +627,20 @@ export async function listAdminBookings(
     vehicleId?: string;
   },
 ) {
-  const now = new Date();
-  const statusWhere: Prisma.BookingWhereInput =
-    query.status === BookingStatus.COMPLETED
-      ? {
-          OR: [
-            { status: BookingStatus.COMPLETED },
-            { status: BookingStatus.BOOKED, endTime: { lte: now } },
-          ],
-        }
-      : query.status === BookingStatus.BOOKED
-        ? { status: BookingStatus.BOOKED, endTime: { gt: now } }
-        : query.status
-          ? { status: query.status }
-          : {};
+  const statusWhere: Prisma.BookingWhereInput = query.status
+    ? { status: query.status }
+    : {};
   const where: Prisma.BookingWhereInput = {
     societyId: user.societyId,
     flatId: query.flatId,
-    vehicleId: query.vehicleId,
+    ...(query.vehicleId
+      ? {
+          OR: [
+            { reassignedVehicleId: query.vehicleId },
+            { vehicleId: query.vehicleId, reassignedVehicleId: null },
+          ],
+        }
+      : {}),
     startTime: {
       gte: query.from ? new Date(query.from) : undefined,
       lte: query.to ? new Date(query.to) : undefined,
@@ -564,6 +654,9 @@ export async function listAdminBookings(
         vehicle: {
           select: { id: true, name: true, registrationNumber: true },
         },
+        reassignedVehicle: {
+          select: { id: true, name: true, registrationNumber: true },
+        },
         flat: { select: { id: true, number: true } },
         user: { select: { id: true, name: true, phone: true } },
       },
@@ -574,7 +667,7 @@ export async function listAdminBookings(
   ]);
 
   return paginated(
-    items.map((booking) => bookingResponse(booking)),
+    items.map((booking) => bookingResponseWithoutOtp(booking)),
     total,
     query.page,
     query.pageSize,
@@ -606,7 +699,7 @@ export async function getAdminBooking(user: AuthUser, id: string) {
     throw new AppError(404, "NOT_FOUND", "Booking not found");
   }
 
-  return bookingResponse(booking);
+  return bookingResponseWithoutOtp(booking);
 }
 
 export async function getAffectedBookings(user: AuthUser) {
@@ -617,6 +710,7 @@ export async function getAffectedBookings(user: AuthUser) {
     },
     include: {
       vehicle: true,
+      reassignedVehicle: true,
       user: { select: { id: true, name: true, phone: true } },
       flat: { select: { id: true, number: true } },
     },
@@ -667,12 +761,22 @@ export async function getAllRechargeRequests(user: AuthUser, page: number, statu
 
 export async function processRechargeRequest(user: AuthUser, requestId: string, action: "APPROVE" | "REJECT") {
   return prisma.$transaction(async (tx) => {
-    const request = await tx.rechargeRequest.findUnique({
-      where: { id: requestId },
-      include: { user: true },
-    });
+    const requests = await tx.$queryRaw<Array<{
+      id: string;
+      userId: string;
+      amount: number;
+      status: RechargeRequestStatus;
+    }>>`
+      SELECT request."id", request."userId", request."amount", request."status"
+      FROM "RechargeRequest" AS request
+      INNER JOIN "User" AS resident ON resident."id" = request."userId"
+      WHERE request."id" = ${requestId}::uuid
+        AND resident."societyId" = ${user.societyId}::uuid
+      FOR UPDATE OF request
+    `;
+    const request = requests[0];
 
-    if (!request || request.user.societyId !== user.societyId) {
+    if (!request) {
       throw new AppError(404, "NOT_FOUND", "Recharge request not found");
     }
 
@@ -681,7 +785,7 @@ export async function processRechargeRequest(user: AuthUser, requestId: string, 
     }
 
     if (action === "REJECT") {
-      return await tx.rechargeRequest.update({
+      return tx.rechargeRequest.update({
         where: { id: requestId },
         data: { status: "REJECTED" },
       });
@@ -697,39 +801,13 @@ export async function processRechargeRequest(user: AuthUser, requestId: string, 
       },
     });
 
-    let wallet = await tx.wallet.findUnique({
-      where: { userId: request.userId },
-    });
-
-    if (!wallet) {
-      wallet = await tx.wallet.create({
-        data: {
-          userId: request.userId,
-          balance: 5000,
-          transactions: {
-            create: {
-              amount: 5000,
-              type: "CREDIT",
-              description: "Initial Promotional Balance",
-            },
-          },
-        },
-      });
-    }
-
-    await tx.wallet.update({
-      where: { id: wallet.id },
-      data: {
-        balance: wallet.balance + request.amount,
-        transactions: {
-          create: {
-            amount: request.amount,
-            type: "CREDIT",
-            description: `Wallet recharge request approved (Req: ${request.id.slice(0, 8)})`,
-          },
-        },
-      },
-    });
+    await creditWallet(
+      tx,
+      request.userId,
+      request.amount,
+      TransactionType.RECHARGE,
+      `Wallet recharge request approved (Req: ${request.id.slice(0, 8)})`,
+    );
 
     return updatedRequest;
   });

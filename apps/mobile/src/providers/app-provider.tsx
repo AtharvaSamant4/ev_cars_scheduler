@@ -3,8 +3,7 @@ import { useEffect, useState, type PropsWithChildren } from "react";
 
 import { useAuthStore } from "@/src/store/auth";
 
-export function AppProvider({ children }: PropsWithChildren) {
-  const hydrate = useAuthStore((state) => state.hydrate);
+function AuthScopedQueryProvider({ children }: PropsWithChildren) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -20,13 +19,24 @@ export function AppProvider({ children }: PropsWithChildren) {
       }),
   );
 
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  );
+}
+
+export function AppProvider({ children }: PropsWithChildren) {
+  const hydrate = useAuthStore((state) => state.hydrate);
+  const authenticatedUserId = useAuthStore((state) => state.user?.id ?? null);
+
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
 
   return (
-    <QueryClientProvider client={queryClient}>
+    <AuthScopedQueryProvider key={authenticatedUserId ?? "anonymous"}>
       {children}
-    </QueryClientProvider>
+    </AuthScopedQueryProvider>
   );
 }

@@ -7,6 +7,7 @@ import {
   ok,
   parseBody,
   routeId,
+  routeParam,
 } from "@/src/lib/http";
 import { updateQuota } from "@/src/modules/admin/service";
 import { currentQuotaWeek } from "@/src/modules/residents/service";
@@ -17,7 +18,7 @@ export const runtime = "nodejs";
 export const PUT = apiRoute(async (request, context) => {
   const user = await requireAuth(request, UserRole.ADMIN);
   const flatId = await routeId(context);
-  const yearValue = await routeId(context, "year");
+  const yearValue = await routeParam(context, "year");
   const year = Number(yearValue);
 
   if (!Number.isInteger(year) || year < 2020 || year > 2100) {
@@ -25,6 +26,6 @@ export const PUT = apiRoute(async (request, context) => {
   }
 
   const input = await parseBody(request, quotaUpdateSchema);
-  const weekNumber = await currentQuotaWeek(user.societyId);
+  const weekNumber = input.weekNumber ?? await currentQuotaWeek(user.societyId);
   return ok(await updateQuota(user, flatId, year, weekNumber, input.allocatedMinutes));
 });

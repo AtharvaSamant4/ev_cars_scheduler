@@ -1,10 +1,12 @@
-import { prisma } from "@society-ev/db";
+import { prisma, UserRole } from "@society-ev/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   currentQuotaPeriods,
   ensureWeeklyQuotaHorizon,
 } from "@/src/modules/quotas/service";
+import type { AuthUser } from "@/src/lib/auth";
+import { updateQuota } from "@/src/modules/admin/service";
 import { cleanupSocietyFixture } from "@/tests/helpers/database";
 
 describe("Weekly quota runtime", () => {
@@ -47,5 +49,27 @@ describe("Weekly quota runtime", () => {
     expect(quotas).toHaveLength(2);
     expect(quotas.find((quota) => quota.year === current.year && quota.weekNumber === current.week)?.usedMinutes).toBe(120);
     expect(quotas.every((quota) => quota.allocatedMinutes === 960)).toBe(true);
+  });
+
+  it("serializes concurrent admin creation of the same weekly quota row", async () => {
+    const admin: AuthUser = {
+      id: "00000000-0000-4000-8000-000000000001",
+      societyId,
+      flatId: null,
+      role: UserRole.ADMIN,
+      name: "Quota Admin",
+    };
+
+    const results = await Promise.allSettled([
+      updateQuota(admin, flatId, 2099, 1, 720),
+      updateQuota(admin, flatId, 2099, 1, 720),
+    ]);
+
+    expect(results.every(({ status }) => status === "fulfilled")).toBe(true);
+    await expect(
+      prisma.flatQuota.count({
+        where: { flatId, year: 2099, weekNumber: 1 },
+      }),
+    ).resolves.toBe(1);
   });
 });

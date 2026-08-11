@@ -22,23 +22,9 @@ export const bookingRangeSchema = z.object({
   endTime: z.iso.datetime({ offset: true }),
 });
 
-export const bookingCreateSchema = bookingRangeSchema
-  .extend({
-    vehicleId: z.string().uuid(),
-  })
-  .superRefine((data, ctx) => {
-    const startTime = new Date(data.startTime).getTime();
-    const now = Date.now();
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-
-    if (startTime - now > sevenDaysMs) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Bookings can only be made up to 7 days in advance.",
-        path: ["startTime"],
-      });
-    }
-  });
+export const bookingCreateSchema = bookingRangeSchema.extend({
+  vehicleId: z.string().uuid(),
+});
 
 export const bookingListQuerySchema = z.object({
   view: z.enum(["upcoming", "history"]).default("upcoming"),
@@ -56,7 +42,8 @@ export const vehicleCreateSchema = z.object({
   registrationNumber: z.string().trim().min(3).max(32),
   status: z.enum(["AVAILABLE", "MAINTENANCE", "INACTIVE", "BREAKDOWN"]).optional(),
   isReserve: z.boolean().optional(),
-  maintenanceReason: z.string().optional(),
+  hourlyRate: z.number().int().min(1).max(100_000).optional(),
+  maintenanceReason: z.string().trim().max(1000).optional(),
   expectedReturnDate: z.string().datetime().optional(),
 });
 
@@ -67,8 +54,9 @@ export const vehicleUpdateSchema = vehicleCreateSchema.partial().refine(
 
 export const flatCreateSchema = z.object({
   number: z.string().trim().min(1).max(30),
-  allocatedMinutes: z.number().int().min(0).default(960),
+  allocatedMinutes: z.number().int().min(0).max(10_080).default(960),
   year: z.number().int().min(2020).max(2100).optional(),
+  weekNumber: z.number().int().min(1).max(53).optional(),
 });
 
 export const flatUpdateSchema = z
@@ -82,7 +70,8 @@ export const flatUpdateSchema = z
   );
 
 export const quotaUpdateSchema = z.object({
-  allocatedMinutes: z.number().int().min(0),
+  allocatedMinutes: z.number().int().min(0).max(10_080),
+  weekNumber: z.number().int().min(1).max(53).optional(),
 });
 
 export const residentCreateSchema = z.object({
@@ -107,13 +96,23 @@ export const residentUpdateSchema = z
 export const adminBookingListQuerySchema = paginationQuerySchema.extend({
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
-  status: z.enum(["BOOKED", "COMPLETED", "CANCELLED"]).optional(),
+  status: z.enum([
+    "BOOKED",
+    "DRIVER_ASSIGNED",
+    "OTP_PENDING",
+    "IN_PROGRESS",
+    "ACTIVE",
+    "COMPLETED",
+    "CANCELLED",
+    "REASSIGNED",
+    "AT_RISK",
+  ]).optional(),
   flatId: z.string().uuid().optional(),
   vehicleId: z.string().uuid().optional(),
 });
 
 export const adminEntityListQuerySchema = paginationQuerySchema.extend({
-  isActive: z.coerce.boolean().optional(),
+  isActive: optionalBooleanQuery,
 });
 
 export const driverLoginSchema = z.object({
@@ -128,6 +127,7 @@ export const driverCreateSchema = z.object({
   licenseNumber: z.string().trim().min(1, "License number is required").max(50),
   isActive: z.boolean().optional(),
   vehicleId: z.string().uuid().optional().or(z.literal("")),
+  password,
 });
 
 export const driverUpdateSchema = driverCreateSchema.partial().refine(
@@ -143,7 +143,7 @@ export type BookingRangeInput = z.infer<typeof bookingRangeSchema>;
 export type BookingCreateInput = z.infer<typeof bookingCreateSchema>;
 
 export const cancellationPenaltyUpdateSchema = z.object({
-  amount: z.number().int().min(0, "Penalty amount cannot be negative"),
+  amount: z.number().int().min(0, "Penalty amount cannot be negative").max(1_000_000),
 });
 
 export const penaltyApplySchema = z.object({
@@ -152,7 +152,7 @@ export const penaltyApplySchema = z.object({
 });
 
 export const rechargeRequestCreateSchema = z.object({
-  amount: z.number().int().min(1, "Amount must be at least 1"),
+  amount: z.number().int().min(1, "Amount must be at least 1").max(1_000_000),
   notes: z.string().trim().max(1000).optional(),
 });
 
@@ -162,4 +162,18 @@ export const rechargeRequestProcessSchema = z.object({
 
 export const mockRechargeSchema = z.object({
   amount: z.number().int().min(1, "Amount must be positive").max(10000, "Maximum demo recharge is 10000"),
+});
+
+export const notificationReadSchema = z
+  .object({
+    notificationIds: z.array(z.string().uuid()).min(1).max(50),
+  })
+  .strict();
+
+export const reportVehicleIssueSchema = z.object({
+  bookingId: z.string().uuid(),
+});
+
+export const tripCompletionSchema = z.object({
+  actualEndTime: z.iso.datetime({ offset: true }).optional(),
 });

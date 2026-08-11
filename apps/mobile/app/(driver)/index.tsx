@@ -10,8 +10,10 @@ import { Screen } from "@/src/components/screen";
 import { TextField } from "@/src/components/text-field";
 import { errorMessage } from "@/src/lib/api";
 import { confirmAction, notify } from "@/src/lib/alerts";
+import { bookingDate, bookingTime, statusLabel } from "@/src/lib/format";
 import { useAuthStore } from "@/src/store/auth";
 import { colors, spacing, radius } from "@/src/theme";
+import type { DriverTrip } from "@/src/types/api";
 
 export default function DriverDashboardScreen() {
   const router = useRouter();
@@ -19,7 +21,7 @@ export default function DriverDashboardScreen() {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const { data, error, isError, isLoading, isRefetching, refetch } = useDriverDashboard();
-  const reportIssueMutation = useReportIssue();
+  const timezone = user?.society.timezone ?? "Asia/Kolkata";
 
   if (isLoading) {
     return (
@@ -29,7 +31,7 @@ export default function DriverDashboardScreen() {
     );
   }
 
-  if (isError) {
+  if (isError || !data) {
     return (
       <Screen style={styles.center}>
         <Card style={styles.card}>
@@ -80,33 +82,13 @@ export default function DriverDashboardScreen() {
       </View>
 
       <Card style={styles.card}>
-        <Text style={styles.title}>Assigned Vehicle</Text>
-        {data?.vehicle ? (
-          <View style={{ gap: spacing.md }}>
-            <View>
-              <Text style={styles.subtitle}>{data.vehicle.name}</Text>
-              <Text style={styles.kicker}>
-                {data.vehicle.registrationNumber}
-              </Text>
-            </View>
-            <Button
-              label="Report Issue (Breakdown)"
-              variant="danger"
-              loading={reportIssueMutation.isPending}
-              disabled={
-                reportIssueMutation.isPending ||
-                data.vehicle.status === "MAINTENANCE" ||
-                data.vehicle.status === "BREAKDOWN"
-              }
-              onPress={async () => {
-                try {
-                  await reportIssueMutation.mutateAsync();
-                  notify("Issue Reported", "Vehicle marked for maintenance. Contact admin for a reserve vehicle.");
-                } catch (error) {
-                  notify("Action Failed", errorMessage(error));
-                }
-              }}
-            />
+        <Text style={styles.title}>Default Assigned Vehicle</Text>
+        {data.vehicle ? (
+          <View>
+            <Text style={styles.subtitle}>{data.vehicle.name}</Text>
+            <Text style={styles.kicker}>
+              {data.vehicle.registrationNumber} · {data.vehicle.status}
+            </Text>
           </View>
         ) : (
           <Text style={styles.subtitle}>No vehicle assigned</Text>
@@ -114,8 +96,10 @@ export default function DriverDashboardScreen() {
       </Card>
 
       <Text style={styles.sectionTitle}>{"Today's Trips"}</Text>
-      {data?.today?.length > 0 ? (
-        data.today.map((trip: any) => <TripCard key={trip.id} trip={trip} />)
+      {data.today.length > 0 ? (
+        data.today.map((trip) => (
+          <TripCard key={trip.id} timezone={timezone} trip={trip} />
+        ))
       ) : (
         <Card style={styles.card}>
           <Text style={styles.subtitle}>No trips scheduled for today</Text>
@@ -123,24 +107,23 @@ export default function DriverDashboardScreen() {
       )}
 
       <Text style={styles.sectionTitle}>Upcoming Trips</Text>
-      {data?.upcoming?.length > 0 ? (
-        data.upcoming.map((trip: any) => (
+      {data.upcoming.length > 0 ? (
+        data.upcoming.map((trip) => (
           <Card key={trip.id} style={styles.card}>
             <View style={styles.row}>
-              <View>
+              <View style={styles.tripCopy}>
                 <Text style={styles.time}>
-                  {new Date(trip.startTime).toLocaleString([], {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {bookingDate(trip.startTime, timezone)} ·{" "}
+                  {bookingTime(trip.startTime, timezone)}
                 </Text>
                 <Text style={styles.subtitle}>
                   Resident: {trip.user.name} (Flat {trip.flat.number})
                 </Text>
                 <Text style={styles.kicker}>
                   EV: {trip.effectiveVehicle.name} ({trip.effectiveVehicle.registrationNumber})
+                </Text>
+                <Text style={styles.kicker}>
+                  Status: {statusLabel(trip.effectiveStatus ?? trip.status)}
                 </Text>
               </View>
             </View>
@@ -155,13 +138,29 @@ export default function DriverDashboardScreen() {
   );
 }
 
-function TripCard({ trip }: { trip: any }) {
+function TripCard({ trip, timezone }: { trip: DriverTrip; timezone: string }) {
   const [otp, setOtp] = useState("");
+  const [completionPromptOpen, setCompletionPromptOpen] = useState(false);
+  const [issuePromptOpen, setIssuePromptOpen] = useState(false);
   const arriveMutation = useDriverArrive(trip.id);
   const verifyMutation = useVerifyOtp(trip.id);
   const completeMutation = useCompleteTrip(trip.id);
+  const reportIssueMutation = useReportIssue(trip.id);
+  const status = trip.effectiveStatus ?? trip.status;
+  const canReportIssue =
+    status === "BOOKED" ||
+    status === "DRIVER_ASSIGNED" ||
+    status === "OTP_PENDING" ||
+    status === "REASSIGNED" ||
+    status === "AT_RISK";
+  const issueUnavailable =
+    trip.effectiveVehicle.status === "BREAKDOWN" ||
+    trip.effectiveVehicle.status === "MAINTENANCE" ||
+    trip.effectiveVehicle.status === "INACTIVE";
 
   const handleArrive = async () => {
+    if (arriveMutation.isPending) return;
+
     try {
       await arriveMutation.mutateAsync();
       notify("Arrived", "OTP generated for resident.");
@@ -171,6 +170,8 @@ function TripCard({ trip }: { trip: any }) {
   };
 
   const handleVerify = async () => {
+    if (verifyMutation.isPending) return;
+
     try {
       await verifyMutation.mutateAsync(otp);
       notify("Trip Started", "OTP verified successfully!");
@@ -179,20 +180,67 @@ function TripCard({ trip }: { trip: any }) {
     }
   };
 
+  const confirmCompletion = () => {
+    if (completeMutation.isPending || completionPromptOpen) return;
+
+    setCompletionPromptOpen(true);
+    confirmAction({
+      title: "Complete this trip?",
+      message:
+        "This records the return time, applies any late-return penalty, and creates the final invoice. It cannot be undone.",
+      confirmLabel: "Complete trip",
+      cancelLabel: "Keep trip active",
+      onCancel: () => setCompletionPromptOpen(false),
+      onConfirm: async () => {
+        try {
+          await completeMutation.mutateAsync();
+          notify("Trip Ended", "Trip successfully completed.");
+        } catch (error) {
+          notify("Action Failed", errorMessage(error));
+        } finally {
+          setCompletionPromptOpen(false);
+        }
+      },
+    });
+  };
+
+  const confirmIssueReport = () => {
+    if (reportIssueMutation.isPending || issuePromptOpen || issueUnavailable) {
+      return;
+    }
+
+    setIssuePromptOpen(true);
+    confirmAction({
+      title: "Report vehicle breakdown?",
+      message: `${trip.effectiveVehicle.name} (${trip.effectiveVehicle.registrationNumber}) is the vehicle for this trip. Reporting it will mark this exact EV as BREAKDOWN and alert the admin to arrange a reserve vehicle.`,
+      confirmLabel: "Report breakdown",
+      cancelLabel: "Do not report",
+      destructive: true,
+      onCancel: () => setIssuePromptOpen(false),
+      onConfirm: async () => {
+        try {
+          await reportIssueMutation.mutateAsync();
+          notify(
+            "Breakdown Reported",
+            "The trip's vehicle was marked as BREAKDOWN. Contact the admin for reserve reassignment.",
+          );
+        } catch (error) {
+          notify("Action Failed", errorMessage(error));
+        } finally {
+          setIssuePromptOpen(false);
+        }
+      },
+    });
+  };
+
   return (
     <Card style={styles.card}>
       <View style={styles.row}>
-        <View>
+        <View style={styles.tripCopy}>
           <Text style={styles.time}>
-            {new Date(trip.startTime).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            {bookingTime(trip.startTime, timezone)}
             {" - "}
-            {new Date(trip.endTime).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            {bookingTime(trip.endTime, timezone)}
           </Text>
           <Text style={styles.subtitle}>
             Resident: {trip.user.name} (Flat {trip.flat.number})
@@ -201,10 +249,11 @@ function TripCard({ trip }: { trip: any }) {
           <Text style={styles.kicker}>
             EV: {trip.effectiveVehicle.name} ({trip.effectiveVehicle.registrationNumber})
           </Text>
+          <Text style={styles.kicker}>Status: {statusLabel(status)}</Text>
         </View>
       </View>
 
-      {(trip.status === "IN_PROGRESS" || trip.status === "ACTIVE") && (
+      {(status === "IN_PROGRESS" || status === "ACTIVE") && (
         <View style={styles.otpSection}>
           <View style={styles.activeBadge}>
             <Text style={styles.activeText}>Trip In Progress</Text>
@@ -213,26 +262,19 @@ function TripCard({ trip }: { trip: any }) {
             label="End Trip"
             variant="primary"
             loading={completeMutation.isPending}
-            disabled={completeMutation.isPending}
-            onPress={async () => {
-              try {
-                await completeMutation.mutateAsync();
-                notify("Trip Ended", "Trip successfully completed.");
-              } catch (error) {
-                notify("Action Failed", errorMessage(error));
-              }
-            }}
+            disabled={completeMutation.isPending || completionPromptOpen}
+            onPress={confirmCompletion}
           />
         </View>
       )}
 
-      {trip.status === "OTP_PENDING" && (
+      {status === "OTP_PENDING" && (
         <View style={styles.otpSection}>
           <TextField
             label="Verification OTP"
             placeholder="Enter 6-digit OTP"
             value={otp}
-            onChangeText={setOtp}
+            onChangeText={(value) => setOtp(value.replace(/\D/g, ""))}
             keyboardType="number-pad"
             maxLength={6}
           />
@@ -245,7 +287,9 @@ function TripCard({ trip }: { trip: any }) {
         </View>
       )}
 
-      {(trip.status === "DRIVER_ASSIGNED" || trip.status === "BOOKED") && (
+      {(status === "DRIVER_ASSIGNED" ||
+        status === "BOOKED" ||
+        status === "REASSIGNED") && (
         <View style={styles.otpSection}>
           <Button
             label="I Have Arrived"
@@ -256,6 +300,22 @@ function TripCard({ trip }: { trip: any }) {
           />
         </View>
       )}
+
+      {canReportIssue ? (
+        <View style={styles.otpSection}>
+          <Button
+            label={
+              issueUnavailable ? "Vehicle Already Unavailable" : "Report EV Breakdown"
+            }
+            variant="danger"
+            loading={reportIssueMutation.isPending}
+            disabled={
+              issueUnavailable || reportIssueMutation.isPending || issuePromptOpen
+            }
+            onPress={confirmIssueReport}
+          />
+        </View>
+      ) : null}
     </Card>
   );
 }
@@ -309,6 +369,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+  tripCopy: {
+    flex: 1,
   },
   time: {
     fontSize: 16,

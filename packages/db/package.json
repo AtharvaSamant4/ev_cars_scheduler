@@ -13,6 +13,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "db:demo:prepare": "node scripts/assert-local-database.mjs && prisma migrate deploy && tsx prisma/seed.ts",
     "db:assert-local": "node scripts/assert-local-database.mjs",
     "db:verify-demo-seed": "node scripts/verify-demo-seed.mjs",
     "db:verify-legacy-upgrade": "node scripts/verify-legacy-upgrade.mjs",

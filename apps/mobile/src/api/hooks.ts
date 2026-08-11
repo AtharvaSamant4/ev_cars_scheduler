@@ -10,14 +10,20 @@ import type {
   Booking,
   BookingMutationResult,
   Dashboard,
+  DriverBookingActionResult,
+  DriverDashboard,
+  DriverTrip,
+  InvoiceDownloadToken,
   PaginatedBookings,
   ResidentSession,
+  Wallet,
 } from "@/src/types/api";
 
 
 export const queryKeys = {
   dashboard: ["dashboard"] as const,
   driverDashboard: ["driverDashboard"] as const,
+  driverHistory: ["driver", "history"] as const,
   bookings: (view: "upcoming" | "history") => ["bookings", view] as const,
   booking: (id: string) => ["booking", id] as const,
   wallet: ["wallet"] as const,
@@ -25,7 +31,7 @@ export const queryKeys = {
 
 export function useResidentLogin() {
   return useMutation({
-    mutationFn: (input: { societyId?: string; flatNumber: string; password?: string }) =>
+    mutationFn: (input: { societyId?: string; flatNumber: string; password: string }) =>
       apiRequest<ResidentSession>("/auth/resident/login", {
         method: "POST",
         body: JSON.stringify(input),
@@ -35,7 +41,7 @@ export function useResidentLogin() {
 
 export function useDriverLogin() {
   return useMutation({
-    mutationFn: (input: { phone: string; password?: string }) =>
+    mutationFn: (input: { phone: string; password: string }) =>
       apiRequest<ResidentSession>("/auth/driver/login", {
         method: "POST",
         body: JSON.stringify(input),
@@ -45,9 +51,10 @@ export function useDriverLogin() {
 
 export function useVerifyOtp(bookingId: string) {
   const queryClient = useQueryClient();
+  const encodedBookingId = encodeURIComponent(bookingId);
   return useMutation({
     mutationFn: (otp: string) =>
-      apiRequest<{ success: boolean }>(`/driver/bookings/${bookingId}/verify-otp`, {
+      apiRequest<DriverBookingActionResult>(`/driver/bookings/${encodedBookingId}/verify-otp`, {
         method: "POST",
         body: JSON.stringify({ otp }),
       }),
@@ -61,9 +68,10 @@ export function useVerifyOtp(bookingId: string) {
 
 export function useDriverArrive(bookingId: string) {
   const queryClient = useQueryClient();
+  const encodedBookingId = encodeURIComponent(bookingId);
   return useMutation({
     mutationFn: () =>
-      apiRequest<{ success: boolean }>(`/driver/bookings/${bookingId}/arrive`, {
+      apiRequest<DriverBookingActionResult>(`/driver/bookings/${encodedBookingId}/arrive`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
@@ -77,15 +85,19 @@ export function useDriverArrive(bookingId: string) {
 
 export function useCompleteTrip(bookingId: string) {
   const queryClient = useQueryClient();
+  const encodedBookingId = encodeURIComponent(bookingId);
 
   return useMutation({
     mutationFn: () =>
-      apiRequest<{ success: boolean }>(`/driver/bookings/${bookingId}/complete`, {
+      apiRequest<DriverBookingActionResult>(`/driver/bookings/${encodedBookingId}/complete`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.driverDashboard });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.driverDashboard }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.driverHistory }),
+      ]);
     },
   });
 }
@@ -93,7 +105,7 @@ export function useCompleteTrip(bookingId: string) {
 export function useWallet() {
   return useQuery({
     queryKey: queryKeys.wallet,
-    queryFn: () => apiRequest<any>("/wallet"),
+    queryFn: () => apiRequest<Wallet>("/wallet"),
   });
 }
 
@@ -108,29 +120,32 @@ export function useDashboard(enabled = true) {
 export function useDriverDashboard() {
   return useQuery({
     queryKey: queryKeys.driverDashboard,
-    queryFn: () => apiRequest<any>("/driver/dashboard"),
+    queryFn: () => apiRequest<DriverDashboard>("/driver/dashboard"),
     refetchInterval: 5_000,
   });
 }
 
 export function useDriverHistory() {
   return useQuery({
-    queryKey: ["driver", "history"],
-    queryFn: () => apiRequest<any[]>("/driver/bookings/history"),
+    queryKey: queryKeys.driverHistory,
+    queryFn: () => apiRequest<DriverTrip[]>("/driver/bookings/history"),
   });
 }
 
-export function useReportIssue() {
+export function useReportIssue(bookingId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: () =>
       apiRequest<{ success: boolean }>("/driver/vehicle/report-issue", {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ bookingId }),
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.driverDashboard });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.driverDashboard }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.driverHistory }),
+      ]);
     },
   });
 }
@@ -146,10 +161,27 @@ export function useBookings(view: "upcoming" | "history") {
 }
 
 export function useBooking(id: string, enabled = true) {
+  const encodedId = encodeURIComponent(id);
   return useQuery({
     queryKey: queryKeys.booking(id),
-    queryFn: () => apiRequest<Booking>(`/bookings/${id}`),
+    queryFn: () => apiRequest<Booking>(`/bookings/${encodedId}`),
     enabled: Boolean(id) && enabled,
+    refetchInterval: (query) => {
+      const status =
+        query.state.data?.effectiveStatus ?? query.state.data?.status;
+      return status === "COMPLETED" || status === "CANCELLED" ? false : 5_000;
+    },
+  });
+}
+
+export function useInvoiceDownloadToken(bookingId: string) {
+  const encodedBookingId = encodeURIComponent(bookingId);
+  return useMutation({
+    mutationFn: () =>
+      apiRequest<InvoiceDownloadToken>(`/bookings/${encodedBookingId}/invoice/token`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
   });
 }
 
@@ -188,10 +220,11 @@ export function useCreateBooking() {
 
 export function useCancelBooking(id: string) {
   const queryClient = useQueryClient();
+  const encodedId = encodeURIComponent(id);
 
   return useMutation({
     mutationFn: () =>
-      apiRequest<BookingMutationResult>(`/bookings/${id}/cancel`, {
+      apiRequest<BookingMutationResult>(`/bookings/${encodedId}/cancel`, {
         method: "POST",
         body: JSON.stringify({}),
       }),

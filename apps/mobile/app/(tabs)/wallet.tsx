@@ -5,7 +5,8 @@ import { useWallet } from "@/src/api/hooks";
 import { Card } from "@/src/components/card";
 import { EmptyState, ErrorState, LoadingState } from "@/src/components/states";
 import { errorMessage } from "@/src/lib/api";
-import { currencyLabel } from "@/src/lib/format";
+import { bookingDate, bookingTime, currencyLabel } from "@/src/lib/format";
+import { useAuthStore } from "@/src/store/auth";
 import { colors, spacing } from "@/src/theme";
 
 import { Button } from "@/src/components/button";
@@ -15,6 +16,8 @@ import { useRouter } from "expo-router";
 export default function WalletScreen() {
   const router = useRouter();
   const { data, isLoading, isError, error, refetch, isRefetching } = useWallet();
+  const timezone =
+    useAuthStore((state) => state.user?.society.timezone) ?? "Asia/Kolkata";
 
   if (isLoading) {
     return <LoadingState label="Loading wallet..." />;
@@ -34,7 +37,7 @@ export default function WalletScreen() {
       <FlatList
         contentContainerStyle={styles.content}
         data={data.transactions}
-        keyExtractor={(item: any) => item.id}
+        keyExtractor={(item) => item.id}
         refreshControl={
           <RefreshControl
             refreshing={isRefetching}
@@ -48,9 +51,14 @@ export default function WalletScreen() {
             <Card style={styles.balanceCard}>
               <Text style={styles.balanceLabel}>Available Balance</Text>
               <Text style={styles.balanceAmount}>{currencyLabel(data.balance)}</Text>
-              <View style={{ marginTop: spacing.lg, width: "100%" }}>
+              <View style={styles.rechargeActions}>
                 <Button
-                  label="Add Money"
+                  label="Scan Society QR"
+                  onPress={() => router.push("/scan-qr")}
+                />
+                <Button
+                  label="Show My Demo QR"
+                  variant="secondary"
                   onPress={() => router.push("/show-qr")}
                 />
               </View>
@@ -64,7 +72,7 @@ export default function WalletScreen() {
             message="Your wallet history will appear here."
           />
         }
-        renderItem={({ item }: { item: any }) => {
+        renderItem={({ item }) => {
           const isDebit = item.type === "DEBIT" || item.type === "BOOKING_DEBIT" || item.type === "PENALTY";
           return (
             <Card style={styles.transactionCard}>
@@ -72,12 +80,8 @@ export default function WalletScreen() {
                 <View style={styles.transactionDetails}>
                   <Text style={styles.transactionDescription}>{item.description}</Text>
                   <Text style={styles.transactionDate}>
-                    {new Date(item.createdAt).toLocaleString([], {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {bookingDate(item.createdAt, timezone)} ·{" "}
+                    {bookingTime(item.createdAt, timezone)}
                   </Text>
                 </View>
                 <View style={styles.transactionAmountContainer}>
@@ -139,6 +143,11 @@ const styles = StyleSheet.create({
     fontSize: 48,
     fontWeight: "900",
     marginTop: spacing.xs,
+  },
+  rechargeActions: {
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    width: "100%",
   },
   transactionsTitle: {
     color: colors.text,

@@ -1,88 +1,26 @@
-import { NextResponse } from "next/server";
-import { prisma, TransactionType } from "@society-ev/db";
+import { z } from "zod";
 
-function isLocalDevelopmentDatabase() {
-  if (process.env.NODE_ENV !== "development" && process.env.NODE_ENV !== "test") {
-    return false;
+import { isSafeLocalDemoDatabase } from "@/src/lib/demo-database";
+import { AppError } from "@/src/lib/errors";
+import { apiRoute, ok, parseBody } from "@/src/lib/http";
+import { publicDemoRechargeWallet } from "@/src/modules/wallet/service";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const publicDemoRechargeSchema = z
+  .object({
+    userId: z.string().uuid(),
+    amount: z.number().int().min(1).max(10_000),
+  })
+  .strict();
+
+export const POST = apiRoute(async (request) => {
+  if (!isSafeLocalDemoDatabase()) {
+    throw new AppError(404, "NOT_FOUND", "Not found");
   }
 
-  try {
-    const databaseUrl = new URL(process.env.DATABASE_URL ?? "");
-    const databaseName = databaseUrl.pathname.replace(/^\//, "");
-    return (
-      (databaseUrl.hostname === "localhost" || databaseUrl.hostname === "127.0.0.1") &&
-      databaseName.startsWith("society_ev_recovery_")
-    );
-  } catch {
-    return false;
-  }
-}
-
-export async function POST(req: Request) {
-  if (!isLocalDevelopmentDatabase()) {
-    return NextResponse.json(
-      { error: { code: "NOT_FOUND", message: "Not found" } },
-      { status: 404 },
-    );
-  }
-
-  try {
-    const { amount, userId } = await req.json();
-
-    if (!amount || typeof amount !== "number" || amount <= 0) {
-      return NextResponse.json(
-        { error: { code: "INVALID_AMOUNT", message: "Valid amount is required" } },
-        { status: 400 },
-      );
-    }
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: { code: "MISSING_USER_ID", message: "User ID is required" } },
-        { status: 400 },
-      );
-    }
-
-    // Find the exact resident
-    const resident = await prisma.user.findFirst({
-      where: { id: userId, role: "RESIDENT" },
-      include: { wallet: true },
-    });
-
-    if (!resident || !resident.wallet) {
-      return NextResponse.json(
-        { error: { code: "NOT_FOUND", message: "No resident found to recharge." } },
-        { status: 404 },
-      );
-    }
-
-    // Add transaction and update wallet
-    const result = await prisma.$transaction(async (tx) => {
-      const transaction = await tx.walletTransaction.create({
-        data: {
-          walletId: resident.wallet!.id,
-          amount,
-          type: TransactionType.CREDIT,
-          description: "Mock QR Demo Recharge",
-        },
-      });
-
-      const updatedWallet = await tx.wallet.update({
-        where: { id: resident.wallet!.id },
-        data: {
-          balance: { increment: amount },
-        },
-      });
-
-      return { transaction, wallet: updatedWallet };
-    });
-
-    return NextResponse.json({ data: result });
-  } catch (error) {
-    console.error("Mock public recharge error:", error);
-    return NextResponse.json(
-      { error: { code: "INTERNAL_ERROR", message: "Failed to process recharge" } },
-      { status: 500 },
-    );
-  }
-}
+  const { amount, userId } = await parseBody(request, publicDemoRechargeSchema);
+  const result = await publicDemoRechargeWallet(userId, amount);
+  return ok(result);
+});

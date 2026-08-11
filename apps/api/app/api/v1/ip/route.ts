@@ -1,18 +1,18 @@
-import { NextResponse } from "next/server";
-import os from "os";
+import os from "node:os";
+
+import { ok } from "@/src/lib/http";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const interfaces = os.networkInterfaces();
-  let localIp = "localhost";
-  
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]!) {
-      if (iface.family === "IPv4" && !iface.internal) {
-        localIp = iface.address;
-        break;
-      }
-    }
-  }
+  const addresses = Object.values(os.networkInterfaces())
+    .flatMap((interfaces) => interfaces ?? [])
+    .filter((address) => address.family === "IPv4" && !address.internal)
+    .map((address) => address.address);
 
-  return NextResponse.json({ ip: localIp });
+  return ok({
+    ip: addresses[0] ?? "127.0.0.1",
+    addresses,
+  });
 }

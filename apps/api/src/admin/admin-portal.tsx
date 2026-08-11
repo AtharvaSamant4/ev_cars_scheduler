@@ -1,16 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import QRCode from "react-qr-code";
 
 import { adminApi, errorMessage, qs } from "./api";
-import { AdminShell, PageHeader, StatusPill } from "./admin-shell";
-import { currency, dateInputToIso, dateTime, hours, minutesFromHours } from "./format";
+import { AdminShell, PageHeader, StatusPill, useAdminUser } from "./admin-shell";
+import {
+  currency,
+  dateInputToIso,
+  dateInputValue,
+  dateTime,
+  hours,
+  minutesFromHours,
+} from "./format";
 import { useAdminData } from "./hooks";
 import type {
   AffectedBooking,
   Booking,
+  BookingStatus,
   Dashboard,
   DriverListItem,
   Flat,
@@ -21,8 +35,6 @@ import type {
   VehicleStatus,
   WalletSummary,
 } from "./types";
-
-const currentYear = new Date().getFullYear();
 
 function Message({ error, success }: { error?: string | null; success?: string | null }) {
   if (error) {
@@ -58,6 +70,10 @@ function DataCard<T>({
   return <>{children(state.data)}</>;
 }
 
+const subscribeToBrowserOrigin = () => () => undefined;
+const browserOriginSnapshot = () => window.location.origin;
+const serverOriginSnapshot = () => "";
+
 export function AdminPortal({ section }: { section: string }) {
   const content =
     section === "vehicles" ? (
@@ -92,9 +108,14 @@ export function AdminPortal({ section }: { section: string }) {
 }
 
 function SocietyQRScreen() {
-  const qrUrl = typeof window !== "undefined"
-    ? `${window.location.protocol}//${window.location.hostname}:3000/demo-payment`
-    : "http://localhost:3000/demo-payment";
+  const origin = useSyncExternalStore(
+    subscribeToBrowserOrigin,
+    browserOriginSnapshot,
+    serverOriginSnapshot,
+  );
+  const qrUrl = origin ? `${origin}/demo-payment` : "";
+  const hostname = origin ? new URL(origin).hostname : "";
+  const loopback = hostname === "localhost" || hostname === "127.0.0.1";
 
   return (
     <>
@@ -104,12 +125,17 @@ function SocietyQRScreen() {
       />
       <div className="grid two-col">
         <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "4rem" }}>
-          <QRCode value={qrUrl} size={256} />
+          {qrUrl ? <QRCode value={qrUrl} size={256} /> : <div className="skeleton" />}
           
-          <h2 style={{ marginTop: "2rem" }}>Scan to Recharge Wallet</h2>
+          <h2 style={{ marginTop: "2rem" }}>Scan in the Resident App</h2>
           <p className="text-muted text-center" style={{ marginTop: "0.5rem" }}>
-            Scan with any native phone camera to open the Mock Payment Gateway.
+            Open Wallet, tap <strong>Scan Society QR</strong>, and scan this code to enter local demo recharge mode.
           </p>
+          {loopback ? (
+            <p className="error" style={{ marginTop: "1rem" }}>
+              Open this admin portal using the laptop&apos;s LAN address before presenting this QR on another phone.
+            </p>
+          ) : null}
         </div>
       </div>
     </>
@@ -140,12 +166,13 @@ function DashboardScreen() {
     const usage = new Map<string, { name: string; count: number }>();
 
     for (const item of active) {
-      const existing = usage.get(item.vehicle.id) ?? {
-        name: item.vehicle.name,
+      const effectiveVehicle = item.reassignedVehicle ?? item.vehicle;
+      const existing = usage.get(effectiveVehicle.id) ?? {
+        name: effectiveVehicle.name,
         count: 0,
       };
       existing.count += 1;
-      usage.set(item.vehicle.id, existing);
+      usage.set(effectiveVehicle.id, existing);
     }
 
     const mostUsed = [...usage.values()].sort((a, b) => b.count - a.count)[0];
@@ -173,7 +200,8 @@ function DashboardScreen() {
           const totalEvs =
             data.vehicles.AVAILABLE +
             data.vehicles.MAINTENANCE +
-            data.vehicles.INACTIVE;
+            data.vehicles.INACTIVE +
+            data.vehicles.BREAKDOWN;
 
           return (
             <div className="grid metric-grid">
@@ -218,6 +246,28 @@ function VehiclesScreen() {
     [],
   );
   const [editing, setEditing] = useState<Vehicle | null>(null);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function deactivate(vehicle: Vehicle) {
+    if (
+      deactivatingId ||
+      !confirm(`Deactivate ${vehicle.name}? Future bookings using this EV will be marked at risk.`)
+    ) {
+      return;
+    }
+
+    setActionError(null);
+    setDeactivatingId(vehicle.id);
+    try {
+      await adminApi(`/admin/vehicles/${vehicle.id}`, { method: "DELETE" });
+      await vehicles.reload();
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setDeactivatingId(null);
+    }
+  }
 
   return (
     <>
@@ -225,6 +275,7 @@ function VehiclesScreen() {
         title="Vehicle Management"
         subtitle="Create EVs, edit registration data, and control operational status."
       />
+      <Message error={actionError} />
       <div className="grid two-col">
         <DataCard state={vehicles}>
           {(data) => (
@@ -262,16 +313,17 @@ function VehiclesScreen() {
                           >
                             Edit
                           </button>
-                          <button
-                            className="button danger"
-                            onClick={() =>
-                              void adminApi(`/admin/vehicles/${vehicle.id}`, {
-                                method: "DELETE",
-                              }).then(() => vehicles.reload())
-                            }
-                          >
-                            Deactivate
-                          </button>
+                          {vehicle.status !== "INACTIVE" ? (
+                            <button
+                              className="button danger"
+                              disabled={Boolean(deactivatingId)}
+                              onClick={() => void deactivate(vehicle)}
+                            >
+                              {deactivatingId === vehicle.id
+                                ? "Deactivating..."
+                                : "Deactivate"}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -303,14 +355,17 @@ function VehicleForm({
   onCancel: () => void;
   onSaved: () => void;
 }) {
+  const timezone = useAdminUser()?.society.timezone ?? "Asia/Kolkata";
   const [name, setName] = useState("");
   const [registrationNumber, setRegistrationNumber] = useState("");
   const [isReserve, setIsReserve] = useState("false");
   const [status, setStatus] = useState<VehicleStatus>("AVAILABLE");
+  const [hourlyRate, setHourlyRate] = useState("100");
   const [maintenanceReason, setMaintenanceReason] = useState("");
   const [expectedReturnDate, setExpectedReturnDate] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -318,21 +373,29 @@ function VehicleForm({
       setRegistrationNumber(editing?.registrationNumber ?? "");
       setIsReserve(editing?.isReserve ? "true" : "false");
       setStatus(editing?.status ?? "AVAILABLE");
+      setHourlyRate(String(editing?.hourlyRate ?? 100));
       setMaintenanceReason(editing?.maintenanceReason ?? "");
       setExpectedReturnDate(
         editing?.expectedReturnDate
-          ? new Date(editing.expectedReturnDate).toISOString().split("T")[0]
+          ? dateInputValue(editing.expectedReturnDate, timezone)
           : ""
       );
     });
-  }, [editing]);
+  }, [editing, timezone]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setMessage(null);
 
+    const parsedHourlyRate = Number(hourlyRate);
+    if (!Number.isInteger(parsedHourlyRate) || parsedHourlyRate <= 0) {
+      setError("Hourly rate must be a positive whole number.");
+      return;
+    }
+
     try {
+      setPending(true);
       const isMaintenance = status === "MAINTENANCE" || status === "BREAKDOWN";
       await adminApi(editing ? `/admin/vehicles/${editing.id}` : "/admin/vehicles", {
         method: editing ? "PATCH" : "POST",
@@ -341,14 +404,19 @@ function VehicleForm({
           registrationNumber, 
           status, 
           isReserve: isReserve === "true",
+          hourlyRate: parsedHourlyRate,
           maintenanceReason: isMaintenance ? maintenanceReason : undefined,
-          expectedReturnDate: isMaintenance && expectedReturnDate ? new Date(expectedReturnDate).toISOString() : undefined
+          expectedReturnDate: isMaintenance
+            ? dateInputToIso(expectedReturnDate, false, timezone)
+            : undefined,
         }),
       });
       setMessage(editing ? "Vehicle updated." : "Vehicle created.");
       onSaved();
     } catch (currentError) {
       setError(errorMessage(currentError));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -360,6 +428,12 @@ function VehicleForm({
         label="Registration Number"
         value={registrationNumber}
         onChange={setRegistrationNumber}
+      />
+      <TextField
+        label="Hourly Rate (INR)"
+        type="number"
+        value={hourlyRate}
+        onChange={setHourlyRate}
       />
       <SelectField
         label="Reserve Vehicle"
@@ -394,8 +468,8 @@ function VehicleForm({
       )}
       <Message error={error} success={message} />
       <div className="actions">
-        <button className="button" type="submit">
-          {editing ? "Save changes" : "Create vehicle"}
+        <button className="button" type="submit" disabled={pending}>
+          {pending ? "Saving..." : editing ? "Save changes" : "Create vehicle"}
         </button>
         {editing ? (
           <button className="button secondary" type="button" onClick={onCancel}>
@@ -413,6 +487,28 @@ function FlatsScreen() {
     [],
   );
   const [editing, setEditing] = useState<Flat | null>(null);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function deactivate(flat: Flat) {
+    if (
+      deactivatingId ||
+      !confirm(`Deactivate flat ${flat.number}? Its resident account will also be disabled.`)
+    ) {
+      return;
+    }
+
+    setActionError(null);
+    setDeactivatingId(flat.id);
+    try {
+      await adminApi(`/admin/flats/${flat.id}`, { method: "DELETE" });
+      await flats.reload();
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setDeactivatingId(null);
+    }
+  }
 
   return (
     <>
@@ -420,6 +516,7 @@ function FlatsScreen() {
         title="Flat Management"
         subtitle="Maintain society flats and weekly quota allocations."
       />
+      <Message error={actionError} />
       <div className="grid two-col">
         <DataCard state={flats}>
           {(data) => (
@@ -454,16 +551,17 @@ function FlatsScreen() {
                             >
                               Edit
                             </button>
-                            <button
-                              className="button danger"
-                              onClick={() =>
-                                void adminApi(`/admin/flats/${flat.id}`, {
-                                  method: "DELETE",
-                                }).then(() => flats.reload())
-                              }
-                            >
-                              Deactivate
-                            </button>
+                            {flat.isActive ? (
+                              <button
+                                className="button danger"
+                                disabled={Boolean(deactivatingId)}
+                                onClick={() => void deactivate(flat)}
+                              >
+                                {deactivatingId === flat.id
+                                  ? "Deactivating..."
+                                  : "Deactivate"}
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -501,6 +599,7 @@ function FlatForm({
   const [isActive, setIsActive] = useState("true");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -515,6 +614,7 @@ function FlatForm({
     setMessage(null);
 
     try {
+      setPending(true);
       if (editing) {
         await adminApi(`/admin/flats/${editing.id}`, {
           method: "PATCH",
@@ -526,7 +626,6 @@ function FlatForm({
           body: JSON.stringify({
             number,
             allocatedMinutes: minutesFromHours(allocatedHours),
-            year: currentYear,
           }),
         });
       }
@@ -534,6 +633,8 @@ function FlatForm({
       onSaved();
     } catch (currentError) {
       setError(errorMessage(currentError));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -559,8 +660,8 @@ function FlatForm({
       )}
       <Message error={error} success={message} />
       <div className="actions">
-        <button className="button" type="submit">
-          {editing ? "Save changes" : "Create flat"}
+        <button className="button" type="submit" disabled={pending}>
+          {pending ? "Saving..." : editing ? "Save changes" : "Create flat"}
         </button>
         {editing ? (
           <button className="button secondary" type="button" onClick={onCancel}>
@@ -582,6 +683,28 @@ function ResidentsScreen() {
     [],
   );
   const [editing, setEditing] = useState<Resident | null>(null);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function deactivate(resident: Resident) {
+    if (
+      deactivatingId ||
+      !confirm(`Deactivate ${resident.name}'s login account?`)
+    ) {
+      return;
+    }
+
+    setActionError(null);
+    setDeactivatingId(resident.id);
+    try {
+      await adminApi(`/admin/residents/${resident.id}`, { method: "DELETE" });
+      await residents.reload();
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setDeactivatingId(null);
+    }
+  }
 
   return (
     <>
@@ -589,6 +712,7 @@ function ResidentsScreen() {
         title="Resident Management"
         subtitle="Create resident accounts, update contact details, reset passwords, and deactivate access."
       />
+      <Message error={actionError} />
       <div className="grid two-col">
         <DataCard state={residents}>
           {(data) => (
@@ -622,16 +746,17 @@ function ResidentsScreen() {
                           >
                             Edit
                           </button>
-                          <button
-                            className="button danger"
-                            onClick={() =>
-                              void adminApi(`/admin/residents/${resident.id}`, {
-                                method: "DELETE",
-                              }).then(() => residents.reload())
-                            }
-                          >
-                            Deactivate
-                          </button>
+                          {resident.isActive ? (
+                            <button
+                              className="button danger"
+                              disabled={Boolean(deactivatingId)}
+                              onClick={() => void deactivate(resident)}
+                            >
+                              {deactivatingId === resident.id
+                                ? "Deactivating..."
+                                : "Deactivate"}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -669,10 +794,11 @@ function ResidentForm({
   const [flatId, setFlatId] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("Demo@123");
+  const [password, setPassword] = useState("");
   const [isActive, setIsActive] = useState("true");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -690,6 +816,7 @@ function ResidentForm({
     setMessage(null);
 
     try {
+      setPending(true);
       if (editing) {
         await adminApi(`/admin/residents/${editing.id}`, {
           method: "PATCH",
@@ -710,6 +837,8 @@ function ResidentForm({
       onSaved();
     } catch (currentError) {
       setError(errorMessage(currentError));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -746,8 +875,8 @@ function ResidentForm({
       ) : null}
       <Message error={error} success={message} />
       <div className="actions">
-        <button className="button" type="submit">
-          {editing ? "Save resident" : "Create resident"}
+        <button className="button" type="submit" disabled={pending}>
+          {pending ? "Saving..." : editing ? "Save resident" : "Create resident"}
         </button>
         {editing ? (
           <button className="button secondary" type="button" onClick={onCancel}>
@@ -803,21 +932,37 @@ function QuotaRow({ flat, onSaved }: { flat: Flat; onSaved: () => void }) {
     quota ? String(quota.allocatedMinutes / 60) : "16",
   );
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   const remaining = quota ? quota.allocatedMinutes - quota.usedMinutes : 0;
 
   async function save() {
     setError(null);
 
+    if (!quota) {
+      setError("The current weekly quota has not been provisioned.");
+      return;
+    }
+
+    const allocatedMinutes = minutesFromHours(allocatedHours);
+    if (!Number.isInteger(allocatedMinutes) || allocatedMinutes < quota.usedMinutes) {
+      setError("Allocation must be valid and cannot be below used time.");
+      return;
+    }
+
     try {
-      await adminApi(`/admin/flats/${flat.id}/quota/${currentYear}`, {
+      setPending(true);
+      await adminApi(`/admin/flats/${flat.id}/quota/${quota.year}`, {
         method: "PUT",
         body: JSON.stringify({
-          allocatedMinutes: minutesFromHours(allocatedHours),
+          allocatedMinutes,
+          weekNumber: quota.weekNumber,
         }),
       });
       onSaved();
     } catch (currentError) {
       setError(errorMessage(currentError));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -836,8 +981,8 @@ function QuotaRow({ flat, onSaved }: { flat: Flat; onSaved: () => void }) {
             value={allocatedHours}
             onChange={(event) => setAllocatedHours(event.target.value)}
           />
-          <button className="button secondary" onClick={() => void save()}>
-            Save
+          <button className="button secondary" disabled={pending || !quota} onClick={() => void save()}>
+            {pending ? "Saving..." : "Save"}
           </button>
         </div>
         {error ? <div className="error" style={{ marginTop: 8 }}>{error}</div> : null}
@@ -847,7 +992,8 @@ function QuotaRow({ flat, onSaved }: { flat: Flat; onSaved: () => void }) {
 }
 
 function BookingsScreen() {
-  const [status, setStatus] = useState("");
+  const timezone = useAdminUser()?.society.timezone ?? "Asia/Kolkata";
+  const [status, setStatus] = useState<BookingStatus | "">("");
   const [flatId, setFlatId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [date, setDate] = useState("");
@@ -867,11 +1013,11 @@ function BookingsScreen() {
           status,
           flatId,
           vehicleId,
-          from: dateInputToIso(date),
-          to: dateInputToIso(date, true),
+          from: dateInputToIso(date, false, timezone),
+          to: dateInputToIso(date, true, timezone),
         })}`,
       ),
-    [status, flatId, vehicleId, date],
+    [status, flatId, vehicleId, date, timezone],
   );
 
   return (
@@ -886,9 +1032,20 @@ function BookingsScreen() {
           <SelectField
             label="Status"
             value={status}
-            options={["", "BOOKED", "COMPLETED", "CANCELLED"]}
+            options={[
+              "",
+              "BOOKED",
+              "DRIVER_ASSIGNED",
+               "OTP_PENDING",
+               "IN_PROGRESS",
+               "ACTIVE",
+               "AT_RISK",
+              "REASSIGNED",
+              "COMPLETED",
+              "CANCELLED",
+            ]}
             labels={{ "": "All statuses" }}
-            onChange={setStatus}
+            onChange={(value) => setStatus(value as BookingStatus | "")}
           />
           <SelectField
             label="Flat"
@@ -938,6 +1095,7 @@ function BookingsTable({
   bookings: Booking[];
   showLink?: boolean;
 }) {
+  const timezone = useAdminUser()?.society.timezone ?? "Asia/Kolkata";
   return (
     <div className="table-wrap">
       <table className="table">
@@ -955,9 +1113,9 @@ function BookingsTable({
           {bookings.map((booking) => (
             <tr key={booking.id}>
               <td>{booking.flat?.number ?? "Unknown"}</td>
-              <td>{booking.vehicle.name}</td>
-              <td>{dateTime(booking.startTime)}</td>
-              <td>{dateTime(booking.endTime)}</td>
+              <td>{(booking.reassignedVehicle ?? booking.vehicle).name}</td>
+              <td>{dateTime(booking.startTime, timezone)}</td>
+              <td>{dateTime(booking.endTime, timezone)}</td>
               <td>
                 <StatusPill value={booking.effectiveStatus} />
               </td>
@@ -977,19 +1135,22 @@ function BookingsTable({
 }
 
 function VehicleStatusScreen() {
+  const timezone = useAdminUser()?.society.timezone ?? "Asia/Kolkata";
   const vehicles = useAdminData(
     () => adminApi<Paginated<Vehicle>>("/admin/vehicles?pageSize=100"),
     [],
   );
   const bookings = useAdminData(
-    () => adminApi<Paginated<Booking>>("/admin/bookings?pageSize=100&status=BOOKED"),
+    () => adminApi<Paginated<Booking>>("/admin/bookings?pageSize=100"),
     [],
   );
 
   const currentVehicleIds = new Set(
     (bookings.data?.items ?? [])
-      .filter((booking) => booking.status === "BOOKED")
-      .map((booking) => booking.vehicle.id),
+      .filter((booking) =>
+        booking.status !== "COMPLETED" && booking.status !== "CANCELLED"
+      )
+      .map((booking) => (booking.reassignedVehicle ?? booking.vehicle).id),
   );
 
   return (
@@ -1002,7 +1163,7 @@ function VehicleStatusScreen() {
         {(data) => (
           <div className="status-list">
             {data.items.map((vehicle) => {
-              const status = currentVehicleIds.has(vehicle.id)
+              const status = vehicle.status === "AVAILABLE" && currentVehicleIds.has(vehicle.id)
                 ? "BOOKED"
                 : vehicle.status;
 
@@ -1016,6 +1177,14 @@ function VehicleStatusScreen() {
                     ) : (
                       <span className="badge" style={{ marginLeft: "8px" }}>NORMAL</span>
                     )}
+                    {vehicle.maintenanceReason ? (
+                      <span className="muted">Reason: {vehicle.maintenanceReason}</span>
+                    ) : null}
+                    {vehicle.expectedReturnDate ? (
+                      <span className="muted">
+                        Expected return: {dateTime(vehicle.expectedReturnDate, timezone)}
+                      </span>
+                    ) : null}
                   </div>
                   <StatusPill value={status} />
                 </div>
@@ -1175,10 +1344,12 @@ function DriverForm({
   const [phoneNumber, setPhoneNumber] = useState("");
   const [email, setEmail] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
+  const [password, setPassword] = useState("");
   const [isActive, setIsActive] = useState("true");
   const [vehicleId, setVehicleId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -1186,6 +1357,7 @@ function DriverForm({
       setPhoneNumber(editing?.phoneNumber ?? "");
       setEmail(editing?.email ?? "");
       setLicenseNumber(editing?.licenseNumber ?? "");
+      setPassword("");
       setIsActive(editing ? String(editing.isActive) : "true");
       setVehicleId(editing?.vehicleId ?? "");
     });
@@ -1197,6 +1369,7 @@ function DriverForm({
     setMessage(null);
 
     try {
+      setPending(true);
       if (editing) {
         await adminApi(`/admin/drivers/${editing.id}`, {
           method: "PATCH",
@@ -1205,8 +1378,9 @@ function DriverForm({
             phoneNumber,
             email: email || undefined,
             licenseNumber,
+            password: password || undefined,
             isActive: isActive === "true",
-            vehicleId: vehicleId || undefined,
+            vehicleId,
           }),
         });
       } else {
@@ -1217,8 +1391,9 @@ function DriverForm({
             phoneNumber,
             email: email || undefined,
             licenseNumber,
+            password,
             isActive: isActive === "true",
-            vehicleId: vehicleId || undefined,
+            vehicleId,
           }),
         });
       }
@@ -1226,6 +1401,8 @@ function DriverForm({
       onSaved();
     } catch (currentError) {
       setError(errorMessage(currentError));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -1236,6 +1413,12 @@ function DriverForm({
       <TextField label="Phone Number" value={phoneNumber} onChange={setPhoneNumber} />
       <TextField label="Email (Optional)" value={email} onChange={setEmail} />
       <TextField label="License Number" value={licenseNumber} onChange={setLicenseNumber} />
+      <TextField
+        label={editing ? "New Password (optional)" : "Login Password"}
+        type="password"
+        value={password}
+        onChange={setPassword}
+      />
       {editing ? (
         <SelectField
           label="Status"
@@ -1254,8 +1437,8 @@ function DriverForm({
       />
       <Message error={error} success={message} />
       <div className="actions">
-        <button className="button" type="submit">
-          {editing ? "Save Driver" : "Create Driver"}
+        <button className="button" type="submit" disabled={pending}>
+          {pending ? "Saving..." : editing ? "Save Driver" : "Create Driver"}
         </button>
         {editing ? (
           <button className="button secondary" type="button" onClick={onCancel}>
@@ -1357,19 +1540,21 @@ function WalletAdjustForm({
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setMessage(null);
 
-    const amount = parseInt(amountStr, 10);
-    if (isNaN(amount) || amount <= 0) {
-      setError("Please enter a valid positive amount.");
+    const amount = Number(amountStr);
+    if (!Number.isInteger(amount) || amount <= 0 || amount > 1_000_000) {
+      setError("Enter a positive whole-number amount up to 1,000,000.");
       return;
     }
 
     try {
+      setPending(true);
       await adminApi(`/admin/wallets/${user.userId}/adjust`, {
         method: "POST",
         body: JSON.stringify({
@@ -1382,6 +1567,8 @@ function WalletAdjustForm({
       onSaved();
     } catch (currentError) {
       setError(errorMessage(currentError));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -1389,7 +1576,7 @@ function WalletAdjustForm({
     <form className="card form-card" onSubmit={submit}>
       <h2 className="panel-title">Adjust Wallet: {user.name}</h2>
       <TextField
-        label="Amount (₹)"
+        label="Amount (INR)"
         type="number"
         value={amountStr}
         onChange={setAmountStr}
@@ -1397,7 +1584,7 @@ function WalletAdjustForm({
       <SelectField
         label="Transaction Type"
         value={typeStr}
-        options={["CREDIT", "DEBIT", "REFUND"]}
+        options={["CREDIT", "DEBIT"]}
         onChange={setTypeStr}
       />
       <TextField
@@ -1407,8 +1594,8 @@ function WalletAdjustForm({
       />
       <Message error={error} success={message} />
       <div className="actions">
-        <button className="button" type="submit">
-          Apply Adjustment
+        <button className="button" type="submit" disabled={pending}>
+          {pending ? "Applying..." : "Apply Adjustment"}
         </button>
         <button className="button secondary" type="button" onClick={onCancel}>
           Cancel
@@ -1436,9 +1623,9 @@ function CancellationSettingsScreen() {
     setMessage(null);
     setSaving(true);
 
-    const amount = parseInt(amountStr, 10);
-    if (isNaN(amount) || amount < 0) {
-      setError("Please enter a valid positive amount.");
+    const amount = Number(amountStr);
+    if (!Number.isInteger(amount) || amount < 0 || amount > 1_000_000) {
+      setError("Enter a whole-number amount from 0 to 1,000,000.");
       setSaving(false);
       return;
     }
@@ -1468,7 +1655,7 @@ function CancellationSettingsScreen() {
       <div className="grid two-col">
         <form className="card form-card" onSubmit={submit}>
           <TextField
-            label="Cancellation Penalty Amount (₹)"
+            label="Cancellation Penalty Amount (INR)"
             type="number"
             value={amountStr}
             onChange={setEditedAmount}
@@ -1486,6 +1673,7 @@ function CancellationSettingsScreen() {
 }
 
 function AffectedBookingsScreen() {
+  const timezone = useAdminUser()?.society.timezone ?? "Asia/Kolkata";
   const affectedBookings = useAdminData(
     () => adminApi<AffectedBooking[]>("/admin/bookings/affected"),
     [],
@@ -1514,9 +1702,9 @@ function AffectedBookingsScreen() {
               <tbody>
                 {data.map((booking) => (
                   <tr key={booking.id}>
-                    <td>{booking.vehicle.name}</td>
-                    <td>{dateTime(booking.startTime)}</td>
-                    <td>{dateTime(booking.endTime)}</td>
+                    <td>{(booking.reassignedVehicle ?? booking.vehicle).name}</td>
+                    <td>{dateTime(booking.startTime, timezone)}</td>
+                    <td>{dateTime(booking.endTime, timezone)}</td>
                     <td>{booking.user.name}</td>
                     <td>
                       <StatusPill value={booking.status} />
@@ -1545,22 +1733,32 @@ function AffectedBookingsScreen() {
 }
 
 function RechargeRequestsScreen() {
+  const timezone = useAdminUser()?.society.timezone ?? "Asia/Kolkata";
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const requests = useAdminData(
     () => adminApi<Paginated<RechargeRequest>>(`/admin/recharge-requests?status=${statusFilter}`),
     [statusFilter],
   );
 
   async function processRequest(id: string, action: "APPROVE" | "REJECT") {
-    if (!confirm(`Are you sure you want to ${action} this request?`)) return;
+    if (processingId || !confirm(`Are you sure you want to ${action.toLowerCase()} this request?`)) {
+      return;
+    }
+
+    setActionError(null);
+    setProcessingId(id);
     try {
       await adminApi(`/admin/recharge-requests/${id}/process`, {
         method: "POST",
         body: JSON.stringify({ action }),
       });
-      void requests.reload();
+      await requests.reload();
     } catch (err) {
-      alert(errorMessage(err));
+      setActionError(errorMessage(err));
+    } finally {
+      setProcessingId(null);
     }
   }
 
@@ -1580,6 +1778,7 @@ function RechargeRequestsScreen() {
           </div>
         }
       />
+      <Message error={actionError} />
 
       <DataCard state={requests}>
         {(data) => (
@@ -1598,7 +1797,7 @@ function RechargeRequestsScreen() {
               <tbody>
                 {data.items.map((req) => (
                   <tr key={req.id}>
-                    <td>{new Date(req.createdAt).toLocaleString()}</td>
+                    <td>{dateTime(req.createdAt, timezone)}</td>
                     <td>
                       {req.user.name} ({req.user.flat?.number})
                     </td>
@@ -1610,15 +1809,17 @@ function RechargeRequestsScreen() {
                     <td>
                       {req.status === "PENDING" ? (
                         <div style={{ display: "flex", gap: 8 }}>
-                          <button
-                            className="button"
-                            onClick={() => processRequest(req.id, "APPROVE")}
+                           <button
+                             className="button"
+                            disabled={Boolean(processingId)}
+                            onClick={() => void processRequest(req.id, "APPROVE")}
                           >
-                            Approve
+                            {processingId === req.id ? "Processing..." : "Approve"}
                           </button>
                           <button
                             className="button secondary"
-                            onClick={() => processRequest(req.id, "REJECT")}
+                            disabled={Boolean(processingId)}
+                            onClick={() => void processRequest(req.id, "REJECT")}
                           >
                             Reject
                           </button>

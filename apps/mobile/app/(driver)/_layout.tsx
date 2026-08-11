@@ -1,9 +1,27 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 
+import { LoadingState } from "@/src/components/states";
+import { useAuthStore } from "@/src/store/auth";
 import { colors } from "@/src/theme";
 
 export default function DriverLayout() {
+  const hydrated = useAuthStore((state) => state.hydrated);
+  const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
+
+  if (!hydrated) {
+    return <LoadingState label="Loading..." />;
+  }
+
+  if (!token || !user) {
+    return <Redirect href="/(auth)/login" />;
+  }
+
+  if (user.role !== "DRIVER") {
+    return <Redirect href="/(tabs)" />;
+  }
+
   return (
     <Tabs
       screenOptions={{

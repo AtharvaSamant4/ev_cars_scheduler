@@ -5,10 +5,14 @@ import { Card } from "@/src/components/card";
 import { Screen } from "@/src/components/screen";
 import { ErrorState, LoadingState } from "@/src/components/states";
 import { errorMessage } from "@/src/lib/api";
+import { bookingDate, bookingTime, statusLabel } from "@/src/lib/format";
+import { useAuthStore } from "@/src/store/auth";
 import { colors, spacing } from "@/src/theme";
 
 export default function DriverHistoryScreen() {
   const history = useDriverHistory();
+  const timezone =
+    useAuthStore((state) => state.user?.society.timezone) ?? "Asia/Kolkata";
 
   if (history.isLoading) {
     return <LoadingState label="Loading past trips..." />;
@@ -48,22 +52,23 @@ export default function DriverHistoryScreen() {
             </Text>
           </View>
         ) : (
-          history.data.map((trip: any) => (
+          history.data.map((trip) => (
             <Card key={trip.id} style={styles.card}>
               <View style={styles.row}>
-                <View>
+                <View style={styles.tripCopy}>
                   <Text style={styles.time}>
-                    {new Date(trip.startTime).toLocaleString([], {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {bookingDate(trip.startTime, timezone)} ·{" "}
+                    {bookingTime(trip.startTime, timezone)}
                   </Text>
                   <Text style={styles.subtitle}>
-                    Resident: {trip.user.name} (Flat {trip.flat?.number})
+                    Resident: {trip.user.name} (Flat {trip.flat.number})
                   </Text>
-                  <Text style={styles.kicker}>Status: {trip.status}</Text>
+                  <Text style={styles.kicker}>
+                    EV: {trip.effectiveVehicle.name} ({trip.effectiveVehicle.registrationNumber})
+                  </Text>
+                  <Text style={styles.kicker}>
+                    Status: {statusLabel(trip.effectiveStatus ?? trip.status)}
+                  </Text>
                 </View>
               </View>
             </Card>
@@ -96,6 +101,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+  tripCopy: {
+    flex: 1,
   },
   time: {
     fontSize: 16,

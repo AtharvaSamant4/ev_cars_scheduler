@@ -25,6 +25,7 @@ type BookingResult = {
     endTime: string;
     actualRideStartTime?: string | null;
     actualEndTime?: string | null;
+    otp?: string | null;
     reassignedVehicleId?: string | null;
     reassignedVehicle?: { id: string } | null;
     invoice?: {
@@ -171,9 +172,9 @@ async function main() {
 
     const adminLogin = await jsonRequest<Login>("auth/admin/login", jsonBody({ email: "fast-track-admin@local.test", password: PASSWORD }));
     const adminToken = adminLogin.token;
-    const penaltyRules = await jsonRequest<Array<{ code: string }>>("admin/penalty-rules", {}, adminToken);
-    if (!penaltyRules.some((rule) => rule.code === "CANCELLATION") || !penaltyRules.some((rule) => rule.code === "LATE_RETURN_PER_HOUR")) {
-      throw new Error("Admin penalty-rule listing omitted an active rule");
+    const cancellationSettings = await jsonRequest<{ amount: number }>("admin/cancellation-penalty", {}, adminToken);
+    if (cancellationSettings.amount !== 50) {
+      throw new Error("Admin cancellation settings returned the wrong configured amount");
     }
     await jsonRequest<unknown>(
       `admin/bookings/${mainBookingId}/reassign`,
@@ -187,15 +188,42 @@ async function main() {
     const driverToken = driverLogin.token;
     const driverDashboard = await jsonRequest<{ upcoming: Array<{ id: string }> }>("driver/dashboard", {}, driverToken);
     if (!driverDashboard.upcoming.some((booking) => booking.id === mainBookingId)) throw new Error("Assigned booking missing from driver dashboard");
-    const arrived = await jsonRequest<{ otp: string; status: string }>(`driver/bookings/${mainBookingId}/arrive`, jsonBody({}), driverToken);
-    if (arrived.status !== "OTP_PENDING" || !/^\d{6}$/.test(arrived.otp)) throw new Error("Driver arrival did not generate a six-digit OTP");
-    const started = await jsonRequest<{ status: string; actualRideStartTime: string }>(`driver/bookings/${mainBookingId}/verify-otp`, jsonBody({ otp: arrived.otp }), driverToken);
+    const arrived = await jsonRequest<{ status: string }>(`driver/bookings/${mainBookingId}/arrive`, jsonBody({}), driverToken);
+    if (arrived.status !== "OTP_PENDING" || "otp" in arrived || JSON.stringify(arrived).includes("passwordHash")) {
+      throw new Error("Driver arrival did not enter OTP_PENDING with a redacted driver response");
+    }
+    const residentOtpView = await jsonRequest<BookingResult["booking"]>(`bookings/${mainBookingId}`, {}, residentToken);
+    if (!residentOtpView.otp || !/^\d{6}$/.test(residentOtpView.otp)) {
+      throw new Error("The owning resident could not retrieve the six-digit arrival OTP");
+    }
+    const started = await jsonRequest<{ status: string; actualRideStartTime: string }>(`driver/bookings/${mainBookingId}/verify-otp`, jsonBody({ otp: residentOtpView.otp }), driverToken);
     if (started.status !== "IN_PROGRESS" || !started.actualRideStartTime) throw new Error("OTP verification did not start the ride");
-    const lateEnd = new Date(mainEnd.getTime() + 65 * 60_000);
-    await jsonRequest(`driver/bookings/${mainBookingId}/complete`, jsonBody({ actualEndTime: lateEnd.toISOString() }), driverToken);
+    if ("otp" in started || JSON.stringify(started).includes("passwordHash")) throw new Error("OTP verification leaked a credential field");
+
+    const lateEnd = new Date(Date.now() - 1_000);
+    const historicalScheduledEnd = new Date(lateEnd.getTime() - 65 * 60_000);
+    const historicalStart = new Date(historicalScheduledEnd.getTime() - 60 * 60_000);
+    await prisma.booking.update({
+      where: { id: mainBookingId },
+      data: {
+        startTime: historicalStart,
+        endTime: historicalScheduledEnd,
+        actualRideStartTime: historicalStart,
+      },
+    });
+    const completionRequestStartedAt = new Date();
+    await jsonRequest(`driver/bookings/${mainBookingId}/complete`, jsonBody({}), driverToken);
+    const completionRequestFinishedAt = new Date();
 
     const completed = await jsonRequest<BookingResult["booking"]>(`bookings/${mainBookingId}`, {}, residentToken);
-    if (completed.status !== "COMPLETED" || !completed.actualRideStartTime || completed.actualEndTime !== lateEnd.toISOString()) {
+    const persistedActualEnd = completed.actualEndTime ? new Date(completed.actualEndTime) : null;
+    if (
+      completed.status !== "COMPLETED" ||
+      !completed.actualRideStartTime ||
+      !persistedActualEnd ||
+      persistedActualEnd < completionRequestStartedAt ||
+      persistedActualEnd > completionRequestFinishedAt
+    ) {
       throw new Error("Completed booking did not persist the real ride timestamps");
     }
     if (!completed.invoice || completed.invoice.subtotal !== 100 || completed.invoice.penaltyAmount !== 150 || completed.invoice.totalAmount !== 250) {
@@ -232,18 +260,24 @@ async function main() {
     const residentReassigned = await jsonRequest<BookingResult["booking"]>(`bookings/${atRisk.booking.id}`, {}, residentToken);
     if (residentReassigned.reassignedVehicle?.id !== reserveVehicle.id) throw new Error("Resident booking detail did not expose the effective reserve vehicle");
 
-    const issue = await jsonRequest<{ success: boolean; vehicle: { status: string } }>("driver/vehicle/report-issue", jsonBody({}), driverToken);
+    await jsonRequest(`admin/bookings/${atRisk.booking.id}/assign-driver`, jsonBody({ driverId: driverProfile.id }), adminToken);
+    const issue = await jsonRequest<{ success: boolean; vehicle: { id: string; status: string } }>(
+      "driver/vehicle/report-issue",
+      jsonBody({ bookingId: atRisk.booking.id }),
+      driverToken,
+    );
     if (!issue.success || issue.vehicle.status !== "BREAKDOWN") throw new Error("Driver report-issue endpoint did not mark the vehicle as BREAKDOWN");
+    if (issue.vehicle.id !== reserveVehicle.id) throw new Error("Driver report-issue did not target the effective reserve vehicle");
 
-    const recharge = await jsonRequest<{ wallet: { balance: number } }>("wallet/public-demo-recharge", jsonBody({ userId: resident.id, amount: 100 }));
-    if (recharge.wallet.balance !== 9_680) throw new Error(`Expected local demo recharge balance 9680, got ${recharge.wallet.balance}`);
+    const recharge = await jsonRequest<Wallet>("wallet/public-demo-recharge", jsonBody({ userId: resident.id, amount: 100 }));
+    if (recharge.balance !== 9_680) throw new Error(`Expected local demo recharge balance 9680, got ${recharge.balance}`);
 
     const verified = await prisma.booking.findUniqueOrThrow({ where: { id: mainBookingId }, include: { penalties: true, invoice: true } });
     if (verified.penalties.length !== 1 || !verified.invoice) throw new Error("Database verification of penalty/invoice failed");
 
     console.log("FAST_TRACK_HTTP_E2E=PASS");
     console.log(`MAIN_BOOKING=${mainBookingId}`);
-    console.log(`FINAL_WALLET=${recharge.wallet.balance}`);
+    console.log(`FINAL_WALLET=${recharge.balance}`);
     console.log("FLOWS=booking,wallet,driver,otp,completion,late-penalty,invoice-pdf,cancellation,maintenance,reserve-reassignment,driver-issue,demo-recharge");
     void admin;
   } finally {

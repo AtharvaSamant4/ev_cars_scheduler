@@ -7,6 +7,7 @@ import {
   PrismaClient,
   UserRole,
 } from "../src/generated/prisma/client";
+import { createGuardedSeedClient } from "../src/seed-safety";
 
 type IsoWeek = {
   year: number;
@@ -24,15 +25,16 @@ const DRIVER_PASSWORD = "Driver@123";
 const BOOKING_HORIZON_DAYS = 7;
 
 function createClient() {
-  const connectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
-
-  if (!connectionString) {
-    throw new Error("DIRECT_URL or DATABASE_URL is required to seed the database");
-  }
-
-  return new PrismaClient({
-    adapter: new PrismaPg({ connectionString }),
-  });
+  return createGuardedSeedClient(
+    {
+      DATABASE_URL: process.env.DATABASE_URL,
+      DIRECT_URL: process.env.DIRECT_URL,
+    },
+    (connectionString) =>
+      new PrismaClient({
+        adapter: new PrismaPg({ connectionString }),
+      }),
+  );
 }
 
 function flatNumbers() {
