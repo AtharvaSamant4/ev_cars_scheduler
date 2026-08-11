@@ -16,10 +16,16 @@ function getLocalIp() {
 }
 
 const currentIp = getLocalIp();
+const allowedDevOrigins = [
+  "127.0.0.1",
+  "localhost",
+  ...(currentIp ? [currentIp] : []),
+];
 
 const nextConfig: NextConfig = {
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   transpilePackages: ["@society-ev/contracts", "@society-ev/db"],
-  allowedDevOrigins: currentIp ? [currentIp] : [],
+  allowedDevOrigins,
   serverExternalPackages: ["pdfkit"],
 };
 

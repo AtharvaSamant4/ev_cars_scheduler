@@ -1,6 +1,5 @@
 import "./load-root-env";
 
-import { PrismaNeon } from "@prisma/adapter-neon";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 import { PrismaClient } from "./generated/prisma/client";
@@ -16,10 +15,13 @@ function createPrismaClient() {
     throw new Error("DATABASE_URL is required");
   }
 
-  const hostname = new URL(connectionString).hostname;
-  const adapter = hostname === "localhost" || hostname === "127.0.0.1"
-    ? new PrismaPg({ connectionString })
-    : new PrismaNeon({ connectionString });
+  const adapter = new PrismaPg({
+    connectionString,
+    connectionTimeoutMillis: 15_000,
+    idleTimeoutMillis: 60_000,
+    keepAlive: true,
+    max: 10,
+  });
   return new PrismaClient({ adapter });
 }
 

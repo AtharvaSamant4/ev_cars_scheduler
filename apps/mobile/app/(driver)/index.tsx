@@ -18,13 +18,25 @@ export default function DriverDashboardScreen() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
-  const { data, isLoading, isRefetching, refetch } = useDriverDashboard();
+  const { data, error, isError, isLoading, isRefetching, refetch } = useDriverDashboard();
   const reportIssueMutation = useReportIssue();
 
   if (isLoading) {
     return (
       <Screen style={styles.center}>
         <Text style={styles.loading}>Loading dashboard...</Text>
+      </Screen>
+    );
+  }
+
+  if (isError) {
+    return (
+      <Screen style={styles.center}>
+        <Card style={styles.card}>
+          <Text style={styles.title}>Unable to load driver dashboard</Text>
+          <Text style={styles.subtitle}>{errorMessage(error)}</Text>
+          <Button label="Try Again" onPress={() => void refetch()} />
+        </Card>
       </Screen>
     );
   }

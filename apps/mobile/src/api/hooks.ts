@@ -109,6 +109,7 @@ export function useDriverDashboard() {
   return useQuery({
     queryKey: queryKeys.driverDashboard,
     queryFn: () => apiRequest<any>("/driver/dashboard"),
+    refetchInterval: 5_000,
   });
 }
 

@@ -33,6 +33,10 @@ type LockedVehicle = {
   hourlyRate: number;
 };
 
+type MappedDriver = {
+  id: string;
+};
+
 type LockedReserveVehicle = {
   id: string;
   name: string;
@@ -215,7 +219,11 @@ function isRetryableTransactionError(error: unknown) {
 
   for (let depth = 0; depth < 5 && current; depth += 1) {
     if (current instanceof Prisma.PrismaClientKnownRequestError) {
-      if (current.code === "P2034") {
+      if (
+        current.code === "P2034" ||
+        (current.code === "P2028" &&
+          current.message.includes("Unable to start a transaction"))
+      ) {
         return true;
       }
     }
@@ -257,6 +265,14 @@ function isRetryableTransactionError(error: unknown) {
   return false;
 }
 
+function isTransactionStartTimeout(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2028" &&
+    error.message.includes("Unable to start a transaction")
+  );
+}
+
 async function serializable<T>(operation: () => Promise<T>) {
   const maxAttempts = 5;
 
@@ -264,8 +280,24 @@ async function serializable<T>(operation: () => Promise<T>) {
     try {
       return await operation();
     } catch (error) {
-      if (!isRetryableTransactionError(error) || attempt === maxAttempts) {
+      if (!isRetryableTransactionError(error)) {
         throw error;
+      }
+
+      if (attempt === maxAttempts) {
+        if (isTransactionStartTimeout(error)) {
+          throw new AppError(
+            503,
+            "DATABASE_BUSY",
+            "The booking service is temporarily busy. Please try again.",
+          );
+        }
+
+        throw new AppError(
+          409,
+          "BOOKING_CONFLICT",
+          "The selected slot was booked concurrently. Please choose another slot.",
+        );
       }
 
       const backoffMs = attempt * 25 + Math.floor(Math.random() * 25);
@@ -425,6 +457,23 @@ export async function createBooking(
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
+        const mappedDrivers = await tx.$queryRaw<MappedDriver[]>`
+          SELECT driver."id"
+          FROM "Driver" AS driver
+          INNER JOIN "User" AS account
+            ON account."societyId" = driver."societyId"
+            AND account."phone" = driver."phoneNumber"
+            AND account."role" = 'DRIVER'
+            AND account."isActive" = true
+          WHERE driver."societyId" = ${user.societyId}::uuid
+            AND driver."vehicleId" = ${vehicle.id}::uuid
+            AND driver."isActive" = true
+          ORDER BY driver."createdAt" ASC, driver."id" ASC
+          LIMIT 2
+        `;
+        const mappedDriver =
+          mappedDrivers.length === 1 ? mappedDrivers[0] : undefined;
+
         const booking = await tx.booking.create({
           data: {
             societyId: user.societyId,
@@ -436,6 +485,10 @@ export async function createBooking(
             startTime: range.startTime,
             endTime: range.endTime,
             durationMinutes: range.durationMinutes,
+            driverId: mappedDriver?.id,
+            status: mappedDriver
+              ? BookingStatus.DRIVER_ASSIGNED
+              : BookingStatus.BOOKED,
             otp,
           },
           include: {
@@ -444,6 +497,13 @@ export async function createBooking(
                 id: true,
                 name: true,
                 registrationNumber: true,
+              },
+            },
+            driver: {
+              select: {
+                id: true,
+                fullName: true,
+                phoneNumber: true,
               },
             },
           },
@@ -478,8 +538,8 @@ export async function createBooking(
       },
       {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        maxWait: 5_000,
-        timeout: 10_000,
+        maxWait: 15_000,
+        timeout: 20_000,
       },
     ),
   );
