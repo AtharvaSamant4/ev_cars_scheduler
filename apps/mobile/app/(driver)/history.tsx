@@ -3,11 +3,12 @@ import { RefreshControl, StyleSheet, Text, View } from "react-native";
 import { useDriverHistory } from "@/src/api/hooks";
 import { Card } from "@/src/components/card";
 import { Screen } from "@/src/components/screen";
+import { StatusPill } from "@/src/components/status-pill";
 import { ErrorState, LoadingState } from "@/src/components/states";
 import { errorMessage } from "@/src/lib/api";
-import { bookingDate, bookingTime, statusLabel } from "@/src/lib/format";
+import { bookingDate, bookingTime } from "@/src/lib/format";
 import { useAuthStore } from "@/src/store/auth";
-import { colors, spacing } from "@/src/theme";
+import { colors } from "@/src/theme";
 
 export default function DriverHistoryScreen() {
   const history = useDriverHistory();
@@ -30,7 +31,6 @@ export default function DriverHistoryScreen() {
   return (
     <Screen
       scroll
-      style={styles.screen}
       scrollProps={{
         refreshControl: (
           <RefreshControl
@@ -41,96 +41,78 @@ export default function DriverHistoryScreen() {
         ),
       }}
     >
-      <Text style={styles.title}>Past Trips</Text>
+      <Text style={styles.title}>History</Text>
 
-      <View style={styles.list}>
-        {history.data.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>No past trips</Text>
-            <Text style={styles.emptyText}>
-              {"You haven't completed any trips yet."}
-            </Text>
-          </View>
-        ) : (
-          history.data.map((trip) => (
-            <Card key={trip.id} style={styles.card}>
+      {history.data.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyTitle}>No past trips</Text>
+          <Text style={styles.emptyText}>
+            {"You haven't completed any trips yet."}
+          </Text>
+        </View>
+      ) : (
+        <View style={{ gap: 10 }}>
+          {history.data.map((trip) => (
+            <Card key={trip.id} style={{ gap: 5 }}>
               <View style={styles.row}>
-                <View style={styles.tripCopy}>
-                  <Text style={styles.time}>
-                    {bookingDate(trip.startTime, timezone)} ·{" "}
-                    {bookingTime(trip.startTime, timezone)}
-                  </Text>
-                  <Text style={styles.subtitle}>
-                    Resident: {trip.user.name} (Flat {trip.flat.number})
-                  </Text>
-                  <Text style={styles.kicker}>
-                    EV: {trip.effectiveVehicle.name} ({trip.effectiveVehicle.registrationNumber})
-                  </Text>
-                  <Text style={styles.kicker}>
-                    Status: {statusLabel(trip.effectiveStatus ?? trip.status)}
-                  </Text>
-                </View>
+                <Text style={styles.rowTitle}>
+                  {trip.flat.number} · {trip.user.name}
+                </Text>
+                <StatusPill status={trip.effectiveStatus ?? trip.status} />
               </View>
+              <Text style={styles.subtitle}>
+                {bookingDate(trip.startTime, timezone)} ·{" "}
+                {bookingTime(trip.startTime, timezone)} · {trip.effectiveVehicle.name}
+              </Text>
             </Card>
-          ))
-        )}
-      </View>
+          ))}
+          <Text style={styles.footerNote}>Completed trips stay here for 90 days.</Text>
+        </View>
+      )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    padding: spacing.md,
-  },
   title: {
     color: colors.text,
-    fontSize: 28,
-    fontWeight: "900",
-    marginBottom: spacing.md,
-    marginTop: spacing.xl,
-  },
-  list: {
-    gap: spacing.md,
-    paddingBottom: spacing.xl * 2,
-  },
-  card: {
-    gap: spacing.sm,
+    fontSize: 24,
+    fontWeight: "700",
+    letterSpacing: -0.2,
   },
   row: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
   },
-  tripCopy: {
-    flex: 1,
-  },
-  time: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: colors.primary,
+  rowTitle: {
+    color: colors.text,
+    fontSize: 14.5,
+    fontWeight: "600",
   },
   subtitle: {
-    fontSize: 16,
-    color: colors.text,
-  },
-  kicker: {
-    fontSize: 14,
     color: colors.textMuted,
+    fontSize: 13,
+  },
+  footerNote: {
+    color: colors.textFaint,
+    fontSize: 12.5,
+    textAlign: "center",
+    paddingTop: 4,
   },
   empty: {
     alignItems: "center",
-    gap: spacing.sm,
+    gap: 8,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 20,
     backgroundColor: colors.surface,
-    padding: spacing.lg,
+    padding: 24,
   },
   emptyTitle: {
     color: colors.text,
     fontSize: 18,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   emptyText: {
     color: colors.textMuted,

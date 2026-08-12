@@ -114,6 +114,9 @@ export function useDashboard(enabled = true) {
     queryKey: queryKeys.dashboard,
     queryFn: () => apiRequest<Dashboard>("/dashboard"),
     enabled,
+    // Matches the driver dashboard's cadence so a resident sitting on Home
+    // sees "driver has arrived, share your OTP" without a manual refresh.
+    refetchInterval: 5_000,
   });
 }
 
@@ -212,6 +215,8 @@ export function useCreateBooking() {
         queryClient.invalidateQueries({
           queryKey: queryKeys.bookings("history"),
         }),
+        // Booking creation debits the wallet server-side.
+        queryClient.invalidateQueries({ queryKey: queryKeys.wallet }),
       ]);
       queryClient.setQueryData(queryKeys.booking(result.booking.id), result.booking);
     },
@@ -238,6 +243,8 @@ export function useCancelBooking(id: string) {
         queryClient.invalidateQueries({
           queryKey: queryKeys.bookings("history"),
         }),
+        // Cancellation refunds the fare (minus any fee) to the wallet.
+        queryClient.invalidateQueries({ queryKey: queryKeys.wallet }),
       ]);
     },
   });

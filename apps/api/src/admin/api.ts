@@ -25,11 +25,21 @@ export async function adminApi<T>(
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`/api/v1${path}`, {
-    ...options,
-    credentials: "include",
-    headers,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`/api/v1${path}`, {
+      ...options,
+      credentials: "include",
+      headers,
+    });
+  } catch {
+    throw new AdminApiError(
+      0,
+      "NETWORK_ERROR",
+      "Can't reach the server right now. Check your connection and try again.",
+    );
+  }
 
   const payload = (await response.json().catch(() => ({}))) as
     | ApiEnvelope<T>
@@ -48,7 +58,13 @@ export async function adminApi<T>(
 }
 
 export function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Something went wrong";
+  // Only AdminApiError carries a message intended for an admin to read; other
+  // runtime faults have developer-facing messages that shouldn't reach the UI.
+  if (error instanceof AdminApiError) {
+    return error.message;
+  }
+
+  return "Something went wrong. Please try again.";
 }
 
 export function qs(params: Record<string, string | number | boolean | undefined>) {

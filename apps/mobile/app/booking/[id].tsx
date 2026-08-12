@@ -5,7 +5,7 @@ import {
   useRouter,
 } from "expo-router";
 import { useCallback, useState } from "react";
-import { Linking, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   useBooking,
@@ -14,6 +14,7 @@ import {
 } from "@/src/api/hooks";
 import { Button } from "@/src/components/button";
 import { Card } from "@/src/components/card";
+import { StatusPill } from "@/src/components/status-pill";
 import { ErrorState, LoadingState } from "@/src/components/states";
 import { Screen } from "@/src/components/screen";
 import { buildApiUrl, errorMessage } from "@/src/lib/api";
@@ -21,11 +22,11 @@ import { confirmAction, notify } from "@/src/lib/alerts";
 import {
   bookingDate,
   bookingTime,
+  currencyLabel,
   hoursLabel,
-  statusLabel,
 } from "@/src/lib/format";
 import { useAuthStore } from "@/src/store/auth";
-import { colors, radius, spacing } from "@/src/theme";
+import { colors, fonts, radius, spacing } from "@/src/theme";
 
 export default function BookingDetailsScreen() {
   const router = useRouter();
@@ -120,38 +121,103 @@ export default function BookingDetailsScreen() {
     }
   };
 
+  const status = booking.data.effectiveStatus;
+  const isLive = status === "IN_PROGRESS" || status === "ACTIVE";
+  const isOtp = status === "OTP_PENDING" && Boolean(booking.data.otp);
+  const isRisk = status === "AT_RISK";
+  const isDone = status === "COMPLETED";
+  const isCancelled = status === "CANCELLED";
+
+  const call = () => {
+    if (booking.data.driver?.phoneNumber) {
+      void Linking.openURL(`tel:${booking.data.driver.phoneNumber}`);
+    }
+  };
+
   return (
     <Screen scroll>
-      <Card style={styles.hero}>
-        <View style={styles.vehicleBadge}>
-          <Text style={styles.vehicleBadgeText}>EV</Text>
+      {isLive ? (
+        <View style={styles.liveHero}>
+          <View style={styles.liveTopRow}>
+            <View style={styles.liveBadge}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveBadgeText}>Ride in progress</Text>
+            </View>
+          </View>
+          <Text style={styles.liveVehicle}>{vehicle.name}</Text>
+          <Text style={styles.liveReg}>{vehicle.registrationNumber}</Text>
+          <View style={styles.liveStatsRow}>
+            <View>
+              <Text style={styles.liveStatLabel}>Due back</Text>
+              <Text style={styles.liveStatValue}>
+                {bookingTime(booking.data.endTime, timezone)}
+              </Text>
+            </View>
+            <View>
+              <Text style={styles.liveStatLabel}>Booked</Text>
+              <Text style={styles.liveStatValue}>
+                {hoursLabel(booking.data.durationMinutes)}
+              </Text>
+            </View>
+          </View>
         </View>
-        <Text style={styles.vehicle}>{vehicle.name}</Text>
-        <Text style={styles.registration}>
-          {vehicle.registrationNumber}
-        </Text>
-        <View
-          style={[
-            styles.status,
-            booking.data.effectiveStatus === "CANCELLED" &&
-              styles.statusCancelled,
-            (booking.data.effectiveStatus === "OTP_PENDING" || booking.data.effectiveStatus === "IN_PROGRESS" || booking.data.effectiveStatus === "ACTIVE") &&
-              styles.statusActive,
-          ]}
-        >
-          <Text
-            style={[
-              styles.statusText,
-              booking.data.effectiveStatus === "CANCELLED" &&
-                styles.statusTextCancelled,
-              (booking.data.effectiveStatus === "OTP_PENDING" || booking.data.effectiveStatus === "IN_PROGRESS" || booking.data.effectiveStatus === "ACTIVE") &&
-                styles.statusTextActive,
-            ]}
-          >
-            {statusLabel(booking.data.effectiveStatus)}
+      ) : null}
+
+      {isLive ? (
+        <Card style={styles.warnCard}>
+          <Text style={styles.warnText}>
+            Returning after {bookingTime(booking.data.endTime, timezone)} adds a
+            late-return penalty per started hour, charged to your wallet when
+            the driver ends the trip.
           </Text>
+        </Card>
+      ) : null}
+
+      {isOtp ? (
+        <View style={styles.otpHero}>
+          <View style={styles.otpBadge}>
+            <View style={styles.otpDot} />
+            <Text style={styles.otpBadgeText}>Driver is waiting</Text>
+          </View>
+          <View style={styles.otpBox}>
+            <Text style={styles.otpValue}>{booking.data.otp}</Text>
+            <Text style={styles.otpHint}>
+              Share with {booking.data.driver?.fullName ?? "your driver"} to
+              start the trip
+            </Text>
+          </View>
         </View>
-      </Card>
+      ) : null}
+
+      {isRisk ? (
+        <Card style={styles.riskCard}>
+          <View style={styles.riskTopRow}>
+            <StatusPill status={status} />
+            <Text style={styles.riskDate}>
+              {bookingDate(booking.data.startTime, timezone)}
+            </Text>
+          </View>
+          <Text style={styles.riskTitle}>
+            {bookingTime(booking.data.startTime, timezone)} –{" "}
+            {bookingTime(booking.data.endTime, timezone)}
+          </Text>
+          <Text style={styles.riskText}>
+            This trip needs attention. The society is arranging things — you
+            will get an alert once it is resolved.
+          </Text>
+        </Card>
+      ) : null}
+
+      {!isLive && !isOtp ? (
+        <Card style={styles.hero}>
+          <View style={styles.vehicleBadge}>
+            <Text style={styles.vehicleBadgeText}>EV</Text>
+          </View>
+          <Text style={styles.vehicle}>{vehicle.name}</Text>
+          <Text style={styles.registration}>{vehicle.registrationNumber}</Text>
+          <StatusPill status={status} />
+        </Card>
+      ) : null}
 
       <Card style={styles.details}>
         <Detail
@@ -166,17 +232,63 @@ export default function BookingDetailsScreen() {
           label="Duration"
           value={hoursLabel(booking.data.durationMinutes)}
         />
-        {booking.data.driver && (
-          <Detail label="Assigned Driver" value={`${booking.data.driver.fullName} (${booking.data.driver.phoneNumber})`} />
-        )}
-        {booking.data.status === "OTP_PENDING" && booking.data.otp && (
-          <Detail label="OTP (Provide to Driver)" value={booking.data.otp} />
-        )}
         {booking.data.actualRideStartTime && (
           <Detail label="Actual Start Time" value={bookingTime(booking.data.actualRideStartTime, timezone)} />
         )}
-        <Detail label="Booking ID" value={booking.data.id} />
+        <Detail label="Booking ID" value={booking.data.id} mono />
       </Card>
+
+      {booking.data.driver ? (
+        <Card style={styles.driverCard}>
+          <View style={styles.driverInfo}>
+            <Text style={styles.driverName}>{booking.data.driver.fullName}</Text>
+            <Text style={styles.driverPhone}>{booking.data.driver.phoneNumber}</Text>
+          </View>
+          <Pressable accessibilityRole="button" onPress={call} style={styles.callButton}>
+            <Text style={styles.callButtonText}>Call</Text>
+          </Pressable>
+        </Card>
+      ) : null}
+
+      {isDone && booking.data.invoice ? (
+        <Card style={styles.invoiceCard}>
+          <View style={styles.invoiceHeader}>
+            <Text style={styles.invoiceTitle}>Invoice</Text>
+          </View>
+          <View style={styles.invoiceRow}>
+            <Text style={styles.invoiceLabel}>
+              Vehicle charge · {hoursLabel(booking.data.durationMinutes)}
+            </Text>
+            <Text style={styles.invoiceValue}>
+              {currencyLabel(booking.data.invoice.subtotal)}
+            </Text>
+          </View>
+          {booking.data.invoice.penaltyAmount > 0 ? (
+            <View style={styles.invoiceRow}>
+              <Text style={styles.invoicePenaltyLabel}>Late return penalty</Text>
+              <Text style={styles.invoicePenaltyValue}>
+                {currencyLabel(booking.data.invoice.penaltyAmount)}
+              </Text>
+            </View>
+          ) : null}
+          <View style={styles.invoiceDivider} />
+          <View style={styles.invoiceRow}>
+            <Text style={styles.invoiceTotalLabel}>Total</Text>
+            <Text style={styles.invoiceTotalValue}>
+              {currencyLabel(booking.data.invoice.totalAmount)}
+            </Text>
+          </View>
+        </Card>
+      ) : null}
+
+      {isCancelled ? (
+        <Card style={styles.details}>
+          <Text style={styles.cancelledText}>
+            This trip was cancelled. Hours were returned to your weekly quota
+            and the charge refunded minus the cancellation fee.
+          </Text>
+        </Card>
+      ) : null}
 
       {cancellation.isError ? (
         <Text style={styles.error}>{errorMessage(cancellation.error)}</Text>
@@ -184,18 +296,25 @@ export default function BookingDetailsScreen() {
 
       {canCancel ? (
         <Button
-          label="Cancel booking"
+          label="Cancel this trip"
           loading={cancellation.isPending}
           disabled={cancellation.isPending || cancellationPromptOpen}
-          variant="danger"
+          variant="dangerOutline"
           onPress={confirmCancellation}
         />
       ) : null}
 
-      {booking.data.status === "COMPLETED" && booking.data.invoice ? (
+      {isLive ? (
+        <Text style={styles.note}>
+          A trip in progress cannot be cancelled. Call the driver or the
+          society office for anything urgent.
+        </Text>
+      ) : null}
+
+      {isDone && booking.data.invoice ? (
         <Button
           label="Download Invoice PDF"
-          variant="primary"
+          variant="secondary"
           loading={invoiceDownload.isPending}
           disabled={invoiceDownload.isPending}
           onPress={() => void downloadInvoice()}
@@ -211,11 +330,11 @@ export default function BookingDetailsScreen() {
   );
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
+function Detail({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
-      <Text selectable style={styles.detailValue}>
+      <Text selectable style={[styles.detailValue, mono && { fontFamily: fonts.mono }]}>
         {value}
       </Text>
     </View>
@@ -239,39 +358,18 @@ const styles = StyleSheet.create({
   vehicleBadgeText: {
     color: colors.primary,
     fontSize: 22,
-    fontWeight: "900",
+    fontWeight: "700",
+    fontFamily: fonts.mono,
   },
   vehicle: {
     color: colors.text,
-    fontSize: 24,
-    fontWeight: "900",
+    fontSize: 22,
+    fontWeight: "700",
   },
   registration: {
     color: colors.textMuted,
-    fontSize: 14,
-  },
-  status: {
-    borderRadius: radius.pill,
-    backgroundColor: colors.successSoft,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  statusCancelled: {
-    backgroundColor: colors.dangerSoft,
-  },
-  statusText: {
-    color: colors.success,
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  statusTextCancelled: {
-    color: colors.danger,
-  },
-  statusActive: {
-    backgroundColor: colors.primary,
-  },
-  statusTextActive: {
-    color: colors.surface,
+    fontSize: 13,
+    fontFamily: fonts.mono,
   },
   details: {
     gap: spacing.md,
@@ -284,18 +382,267 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 11,
+    fontWeight: "600",
     textTransform: "uppercase",
   },
   detailValue: {
     color: colors.text,
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 15,
+    fontWeight: "600",
   },
   error: {
     color: colors.danger,
     fontSize: 14,
     textAlign: "center",
+  },
+  note: {
+    color: colors.textFaint,
+    fontSize: 12.5,
+    lineHeight: 18,
+    textAlign: "center",
+  },
+
+  // live hero
+  liveHero: {
+    backgroundColor: colors.ink,
+    borderRadius: radius.lg,
+    padding: 18,
+  },
+  liveTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  liveBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.live,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.liveDot,
+  },
+  liveBadgeText: {
+    color: colors.surface,
+    fontSize: 11.5,
+    fontWeight: "600",
+  },
+  liveVehicle: {
+    color: colors.surface,
+    fontSize: 21,
+    fontWeight: "700",
+    marginTop: 16,
+  },
+  liveReg: {
+    color: colors.textFaint,
+    fontSize: 13,
+    marginTop: 4,
+    fontFamily: fonts.mono,
+  },
+  liveStatsRow: {
+    flexDirection: "row",
+    gap: 26,
+    marginTop: 18,
+  },
+  liveStatLabel: {
+    color: colors.textFaint,
+    fontSize: 12,
+  },
+  liveStatValue: {
+    color: colors.surface,
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 4,
+  },
+  warnCard: {
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warningBorder,
+  },
+  warnText: {
+    color: colors.warning,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+
+  // otp hero
+  otpHero: {
+    backgroundColor: colors.ink,
+    borderRadius: radius.lg,
+    padding: 18,
+  },
+  otpBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    backgroundColor: colors.accent,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+  },
+  otpDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.warning,
+  },
+  otpBadgeText: {
+    color: colors.warning,
+    fontSize: 11.5,
+    fontWeight: "600",
+  },
+  otpBox: {
+    marginTop: 16,
+    backgroundColor: colors.inkSoft,
+    borderRadius: 14,
+    padding: 16,
+    alignItems: "center",
+  },
+  otpValue: {
+    color: colors.surface,
+    fontSize: 38,
+    fontWeight: "700",
+    letterSpacing: 6,
+    fontFamily: fonts.mono,
+  },
+  otpHint: {
+    color: colors.textFaint,
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: "center",
+  },
+
+  // at-risk
+  riskCard: {
+    borderColor: colors.warningBorder,
+  },
+  riskTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  riskDate: {
+    color: colors.textFaint,
+    fontSize: 11.5,
+    fontFamily: fonts.mono,
+  },
+  riskTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "700",
+    marginTop: 12,
+  },
+  riskText: {
+    color: colors.warning,
+    backgroundColor: colors.warningSoft,
+    borderRadius: radius.md,
+    padding: 13,
+    marginTop: 14,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  cancelledText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+
+  // driver
+  driverCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  driverInfo: {
+    flex: 1,
+  },
+  driverName: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  driverPhone: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+    fontFamily: fonts.mono,
+  },
+  callButton: {
+    minHeight: 44,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+  },
+  callButtonText: {
+    color: colors.surface,
+    fontSize: 13.5,
+    fontWeight: "600",
+  },
+
+  // invoice
+  invoiceCard: {
+    padding: 0,
+    overflow: "hidden",
+  },
+  invoiceHeader: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  invoiceTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  invoiceRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  invoiceLabel: {
+    color: colors.textMuted,
+    fontSize: 13.5,
+  },
+  invoiceValue: {
+    color: colors.text,
+    fontSize: 13.5,
+    fontFamily: fonts.mono,
+  },
+  invoicePenaltyLabel: {
+    color: colors.danger,
+    fontSize: 13.5,
+  },
+  invoicePenaltyValue: {
+    color: colors.danger,
+    fontSize: 13.5,
+    fontFamily: fonts.mono,
+  },
+  invoiceDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginTop: 14,
+    marginHorizontal: 16,
+  },
+  invoiceTotalLabel: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  invoiceTotalValue: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "700",
+    fontFamily: fonts.mono,
+    paddingBottom: 16,
   },
 });

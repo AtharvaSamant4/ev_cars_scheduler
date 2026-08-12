@@ -5,7 +5,13 @@ import type { BookingStatus } from "@/src/types/api";
 
 export function hoursLabel(minutes: number) {
   const hours = minutes / 60;
-  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hrs`;
+  const rounded = Number.isInteger(hours) ? hours : Number(hours.toFixed(1));
+  return `${rounded} ${rounded === 1 ? "hr" : "hrs"}`;
+}
+
+export function hoursShortLabel(minutes: number) {
+  const hours = minutes / 60;
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`;
 }
 
 export function currencyLabel(value: number) {
@@ -92,11 +98,12 @@ export function bookingRange(
 }
 
 export function statusLabel(status: BookingStatus) {
-  if (status === "BOOKED" || status === "DRIVER_ASSIGNED") return "Upcoming";
-  if (status === "OTP_PENDING") return "OTP Pending";
-  if (status === "IN_PROGRESS" || status === "ACTIVE") return "In Progress";
+  if (status === "BOOKED") return "Confirmed";
+  if (status === "DRIVER_ASSIGNED") return "Driver assigned";
+  if (status === "OTP_PENDING") return "Share your OTP";
+  if (status === "IN_PROGRESS" || status === "ACTIVE") return "Ride in progress";
   if (status === "COMPLETED") return "Completed";
-  if (status === "REASSIGNED") return "Reassigned";
-  if (status === "AT_RISK") return "At Risk";
+  if (status === "REASSIGNED") return "Vehicle changed";
+  if (status === "AT_RISK") return "Needs attention";
   return "Cancelled";
 }

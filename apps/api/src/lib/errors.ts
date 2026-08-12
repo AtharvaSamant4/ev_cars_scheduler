@@ -19,12 +19,16 @@ export function toAppError(error: unknown) {
   }
 
   if (error instanceof ZodError) {
-    return new AppError(
-      422,
-      "VALIDATION_ERROR",
-      "The request contains invalid data",
-      error.flatten(),
+    const flattened = error.flatten();
+    const fieldErrors = flattened.fieldErrors as Record<string, string[] | undefined>;
+    const fieldMessage = Object.entries(fieldErrors).find(
+      ([, messages]) => messages && messages.length > 0,
     );
+    const message = fieldMessage
+      ? `${fieldMessage[0]}: ${fieldMessage[1]![0]}`
+      : ((flattened.formErrors as string[])[0] ?? "The request contains invalid data");
+
+    return new AppError(422, "VALIDATION_ERROR", message, flattened);
   }
 
   if (error instanceof Prisma.PrismaClientKnownRequestError) {

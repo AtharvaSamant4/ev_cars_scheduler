@@ -143,6 +143,7 @@ function SocietyQRScreen() {
 }
 
 function DashboardScreen() {
+  const timezone = useAdminUser()?.society.timezone ?? "Asia/Kolkata";
   const dashboard = useAdminData(
     () => adminApi<Dashboard>("/admin/dashboard"),
     [],
@@ -153,6 +154,10 @@ function DashboardScreen() {
   );
   const bookings = useAdminData(
     () => adminApi<Paginated<Booking>>("/admin/bookings?pageSize=100"),
+    [],
+  );
+  const affectedBookings = useAdminData(
+    () => adminApi<AffectedBooking[]>("/admin/bookings/affected"),
     [],
   );
 
@@ -194,6 +199,41 @@ function DashboardScreen() {
         title="Admin Dashboard"
         subtitle="A trustee-friendly overview of flats, residents, fleet status, and active demand."
       />
+
+      {!affectedBookings.loading && affectedBookings.data && affectedBookings.data.length > 0 ? (
+        <div className="exceptions-banner" style={{ marginBottom: 16 }}>
+          <div className="exceptions-banner-title">Needs a decision</div>
+          <div className="exceptions-grid">
+            {affectedBookings.data.slice(0, 6).map((booking) => (
+              <div className="exception-card" key={booking.id}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <StatusPill value={booking.status} />
+                  <span className="muted" style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                    {booking.id.slice(0, 10)}
+                  </span>
+                </div>
+                <div style={{ fontWeight: 600, fontSize: 14.5, marginTop: 10 }}>
+                  {booking.user.name} · {dateTime(booking.startTime, timezone)}
+                </div>
+                <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+                  {(booking.reassignedVehicle ?? booking.vehicle).name}
+                </div>
+                <Link className="button" href={`/admin/bookings/${booking.id}`} style={{ marginTop: 12, minHeight: 38, fontSize: 12.5, padding: "0 13px" }}>
+                  Resolve
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {!affectedBookings.loading && affectedBookings.data && affectedBookings.data.length === 0 ? (
+        <div className="exceptions-banner clear" style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, fontSize: 15.5 }}>Nothing needs a decision</div>
+          <div className="muted" style={{ fontSize: 13.5, marginTop: 5 }}>
+            Every trip today has a driver and a working EV.
+          </div>
+        </div>
+      ) : null}
 
       <DataCard state={dashboard}>
         {(data) => {

@@ -1,6 +1,8 @@
 import { useAuthStore } from "@/src/store/auth";
 import type { ApiErrorPayload } from "@/src/types/api";
 
+const LOGIN_PATHS = ["/auth/resident/login", "/auth/driver/login"];
+
 const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
 const API_URL = (
   configuredApiUrl || "http://127.0.0.1:3000/api/v1"
@@ -111,10 +113,24 @@ export async function apiRequest<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(buildApiUrl(path), {
-    ...options,
-    headers,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(buildApiUrl(path), {
+      ...options,
+      headers,
+    });
+  } catch {
+    // fetch only rejects for transport-level failures (server down, no
+    // network, DNS). The raw message ("Network request failed") means nothing
+    // to a resident, so translate it into something actionable.
+    throw new ApiError(
+      0,
+      "NETWORK_ERROR",
+      "Can't reach the server right now. Check your connection and try again.",
+    );
+  }
+
   const payload = (await response.json().catch(() => ({}))) as
     | { data: T }
     | ApiErrorPayload;
@@ -122,7 +138,10 @@ export async function apiRequest<T>(
   if (!response.ok) {
     const error = "error" in payload ? payload.error : undefined;
 
-    if (response.status === 401 && !path.includes("/auth/resident/login")) {
+    if (
+      response.status === 401 &&
+      !LOGIN_PATHS.some((loginPath) => path.includes(loginPath))
+    ) {
       await useAuthStore.getState().logout();
     }
 
@@ -138,5 +157,12 @@ export async function apiRequest<T>(
 }
 
 export function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Something went wrong";
+  // Only ApiError carries a message written for people: either one the API
+  // deliberately returned or one built above. Anything else is an unexpected
+  // runtime fault whose message is developer-facing, so keep it out of the UI.
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+
+  return "Something went wrong. Please try again.";
 }

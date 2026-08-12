@@ -1,8 +1,12 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 
+import { AppErrorBoundary } from "@/src/components/error-boundary";
 import { AppProvider } from "@/src/providers/app-provider";
 import { colors } from "@/src/theme";
+
+// Expo Router renders this for any render-time throw below the root layout.
+export { AppErrorBoundary as ErrorBoundary };
 
 export default function RootLayout() {
   return (
@@ -21,9 +25,6 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(driver)" options={{ headerShown: false }} />
-        <Stack.Screen name="show-qr" options={{ headerShown: false }} />
-        <Stack.Screen name="scan-qr" options={{ headerShown: false }} />
-        <Stack.Screen name="qr-recharge" options={{ headerShown: false }} />
         <Stack.Screen
           name="booking/[id]"
           options={{ title: "Booking details" }}

@@ -38,7 +38,7 @@ export default function MyBookingsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <FlatList
         contentContainerStyle={styles.content}
         data={bookings.data.items}
@@ -138,16 +138,17 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   kicker: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: "800",
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "600",
     letterSpacing: 0.8,
   },
   title: {
     color: colors.text,
-    fontSize: 28,
-    fontWeight: "900",
-    marginTop: spacing.xs,
+    fontSize: 24,
+    fontWeight: "700",
+    marginTop: 4,
+    letterSpacing: -0.2,
   },
   segment: {
     flexDirection: "row",
@@ -167,10 +168,10 @@ const styles = StyleSheet.create({
   },
   segmentText: {
     color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 13.5,
+    fontWeight: "600",
   },
   segmentTextActive: {
-    color: colors.primary,
+    color: colors.text,
   },
 });

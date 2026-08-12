@@ -2,19 +2,13 @@ import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useWallet } from "@/src/api/hooks";
-import { Card } from "@/src/components/card";
 import { EmptyState, ErrorState, LoadingState } from "@/src/components/states";
 import { errorMessage } from "@/src/lib/api";
 import { bookingDate, bookingTime, currencyLabel } from "@/src/lib/format";
 import { useAuthStore } from "@/src/store/auth";
-import { colors, spacing } from "@/src/theme";
-
-import { Button } from "@/src/components/button";
-
-import { useRouter } from "expo-router";
+import { colors, fonts, radius, spacing } from "@/src/theme";
 
 export default function WalletScreen() {
-  const router = useRouter();
   const { data, isLoading, isError, error, refetch, isRefetching } = useWallet();
   const timezone =
     useAuthStore((state) => state.user?.society.timezone) ?? "Asia/Kolkata";
@@ -33,7 +27,7 @@ export default function WalletScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <FlatList
         contentContainerStyle={styles.content}
         data={data.transactions}
@@ -47,23 +41,15 @@ export default function WalletScreen() {
         }
         ListHeaderComponent={
           <View style={styles.header}>
-            <Text style={styles.kicker}>MY WALLET</Text>
-            <Card style={styles.balanceCard}>
-              <Text style={styles.balanceLabel}>Available Balance</Text>
+            <Text style={styles.kicker}>WALLET</Text>
+            <View style={styles.balanceCard}>
+              <Text style={styles.balanceLabel}>Available balance</Text>
               <Text style={styles.balanceAmount}>{currencyLabel(data.balance)}</Text>
-              <View style={styles.rechargeActions}>
-                <Button
-                  label="Scan Society QR"
-                  onPress={() => router.push("/scan-qr")}
-                />
-                <Button
-                  label="Show My Demo QR"
-                  variant="secondary"
-                  onPress={() => router.push("/show-qr")}
-                />
-              </View>
-            </Card>
-            <Text style={styles.transactionsTitle}>Recent Transactions</Text>
+              <Text style={styles.balanceHint}>
+                Need a top-up? Ask the society office to credit your wallet.
+              </Text>
+            </View>
+            <Text style={styles.transactionsTitle}>Activity</Text>
           </View>
         }
         ListEmptyComponent={
@@ -72,30 +58,43 @@ export default function WalletScreen() {
             message="Your wallet history will appear here."
           />
         }
-        renderItem={({ item }) => {
+        renderItem={({ item, index }) => {
           const isDebit = item.type === "DEBIT" || item.type === "BOOKING_DEBIT" || item.type === "PENALTY";
+          const isPenalty = item.type === "PENALTY";
+          const isFirst = index === 0;
+          const isLast = index === data.transactions.length - 1;
           return (
-            <Card style={styles.transactionCard}>
-              <View style={styles.transactionRow}>
-                <View style={styles.transactionDetails}>
-                  <Text style={styles.transactionDescription}>{item.description}</Text>
-                  <Text style={styles.transactionDate}>
-                    {bookingDate(item.createdAt, timezone)} ·{" "}
-                    {bookingTime(item.createdAt, timezone)}
-                  </Text>
-                </View>
-                <View style={styles.transactionAmountContainer}>
-                  <Text
-                    style={[
-                      styles.transactionAmount,
-                      isDebit ? styles.debit : styles.credit,
-                    ]}
-                  >
-                    {isDebit ? "-" : "+"}{currencyLabel(item.amount)}
-                  </Text>
-                </View>
+            <View
+              style={[
+                styles.transactionRow,
+                isFirst && styles.transactionRowFirst,
+                isLast && styles.transactionRowLast,
+                isPenalty && styles.transactionRowPenalty,
+              ]}
+            >
+              <View style={styles.transactionDetails}>
+                <Text
+                  style={[
+                    styles.transactionDescription,
+                    isPenalty && styles.transactionDescriptionPenalty,
+                  ]}
+                >
+                  {item.description}
+                </Text>
+                <Text style={styles.transactionDate}>
+                  {bookingDate(item.createdAt, timezone)} ·{" "}
+                  {bookingTime(item.createdAt, timezone)}
+                </Text>
               </View>
-            </Card>
+              <Text
+                style={[
+                  styles.transactionAmount,
+                  isDebit ? styles.debit : styles.credit,
+                ]}
+              >
+                {isDebit ? "−" : "+"}{currencyLabel(item.amount)}
+              </Text>
+            </View>
           );
         }}
       />
@@ -121,47 +120,63 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   kicker: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: "800",
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "600",
     letterSpacing: 0.8,
   },
   balanceCard: {
-    alignItems: "center",
-    paddingVertical: spacing.xl,
-    backgroundColor: colors.surface,
-    borderColor: colors.primarySoft,
-    borderWidth: 2,
+    alignItems: "flex-start",
+    padding: 20,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
   },
   balanceLabel: {
-    color: colors.textMuted,
-    fontSize: 16,
-    fontWeight: "700",
+    color: colors.primarySoft,
+    fontSize: 13,
   },
   balanceAmount: {
-    color: colors.primary,
-    fontSize: 48,
-    fontWeight: "900",
+    color: colors.surface,
+    fontSize: 40,
+    fontWeight: "700",
     marginTop: spacing.xs,
+    letterSpacing: -0.5,
+    fontFamily: fonts.mono,
   },
-  rechargeActions: {
-    gap: spacing.sm,
-    marginTop: spacing.lg,
-    width: "100%",
+  balanceHint: {
+    color: colors.primarySoft,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: spacing.md,
   },
   transactionsTitle: {
     color: colors.text,
-    fontSize: 20,
-    fontWeight: "900",
+    fontSize: 15,
+    fontWeight: "600",
     marginTop: spacing.md,
-  },
-  transactionCard: {
-    padding: spacing.md,
   },
   transactionRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    backgroundColor: colors.surface,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+  },
+  transactionRowFirst: {
+    borderTopWidth: 1,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+  },
+  transactionRowLast: {
+    borderBottomLeftRadius: radius.lg,
+    borderBottomRightRadius: radius.lg,
+  },
+  transactionRowPenalty: {
+    backgroundColor: colors.dangerSoft,
   },
   transactionDetails: {
     flex: 1,
@@ -169,23 +184,24 @@ const styles = StyleSheet.create({
   },
   transactionDescription: {
     color: colors.text,
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 14.5,
+    fontWeight: "600",
+  },
+  transactionDescriptionPenalty: {
+    color: colors.danger,
   },
   transactionDate: {
-    color: colors.textMuted,
+    color: colors.textFaint,
     fontSize: 12,
-    marginTop: spacing.xs,
-  },
-  transactionAmountContainer: {
-    alignItems: "flex-end",
+    marginTop: 3,
   },
   transactionAmount: {
-    fontSize: 18,
-    fontWeight: "900",
+    fontSize: 15,
+    fontWeight: "600",
+    fontFamily: fonts.mono,
   },
   credit: {
-    color: colors.success,
+    color: colors.live,
   },
   debit: {
     color: colors.danger,

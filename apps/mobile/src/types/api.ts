@@ -161,10 +161,17 @@ export type Dashboard = {
   upcomingBookings: Booking[];
 };
 
+export type AvailableVehicle = VehicleSummary & {
+  hourlyRate: number;
+  estimatedCost: number;
+  affordable: boolean;
+};
+
 export type Availability = {
   available: boolean;
   availableVehicleCount: number;
-  availableVehicles: VehicleSummary[];
+  availableVehicles: AvailableVehicle[];
+  walletBalance: number;
   durationMinutes: number;
   quota: Quota & {
     sufficient: boolean;

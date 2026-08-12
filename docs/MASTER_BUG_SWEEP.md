@@ -1,6 +1,6 @@
 # Master Bug Sweep
 
-**Status: PARTIAL** — the hardened code and all local gates pass; one pre-existing Neon wallet/ledger mismatch still requires a separately backed-up data reconciliation.
+**Status: PARTIAL** — the hardened code and all local gates pass. The previously reported Neon wallet/ledger mismatch is now **RESOLVED** (see below); other remaining risks are still open.
 
 ## Outcome
 
@@ -49,11 +49,15 @@
 | Git diff check | PASS |
 | Neon migration status / Prisma drift | PASS — read-only |
 
+## Resolved since this sweep
+
+- **RESOLVED — Neon wallet/ledger mismatch.** Wallet `f13ea16f-aabd-4461-bbdc-7315e52cf18b` had `Wallet.balance` = ₹2,000 against a signed `WalletTransaction` ledger total of ₹1,500 (a ₹500 difference). The full transaction history was inspected manually; no `RechargeRequest` existed for the user that could explain a legitimate missing ₹500 credit. Conclusion: the stored balance was stale historical data, and the ledger was treated as authoritative. The Neon wallet was repaired from ₹2,000 → ₹1,500 using a conditional update that only applied if the balance was still ₹2,000. The wallet now matches the verified ledger. Going forward, `Wallet.balance` must equal the signed `WalletTransaction` ledger total.
+
 ## Remaining known risks
 
-- Neon has **1 pre-existing wallet whose stored balance does not equal its signed ledger total**. No remote row was changed. Back up Neon and reconcile that resident's financial history before calling the live data production-ready.
+- **DEFERRED until the payment gateway is added — penalty debits can drive a wallet negative.** `adjustWalletBalance` refuses a manual admin `DEBIT` that would take the balance below zero (`INSUFFICIENT_FUNDS`), and `createBooking` refuses a booking the balance cannot cover. The two penalty paths apply no such floor: `completeTrip` decrements an unbounded late-return penalty (`ceil(delayMinutes / 60) × rule.amount`), and `cancelBooking` applies `increment: deduction − penaltyAmount`, which is negative when the cancellation penalty exceeds the original charge. A resident driven negative cannot book again until an admin credits the wallet. The `Wallet.balance` = signed-ledger-total invariant is **not** violated: balance and ledger move together in every path, and there is no `CHECK` constraint on `Wallet.balance`, so the database permits the negative value. This is deliberately left open because it is a money-policy decision, not a defect — clamping penalties at zero would silently forgive money genuinely owed, whereas a payment gateway makes a negative balance a collectable invoice ("settle ₹800 to book again"). Decide the policy alongside the gateway, then make all four paths consistent.
 - The Neon credential was shared outside the ignored environment file during recovery; rotate it in Neon and update local/deployment secrets.
 - Interactive browser automation was unavailable in this execution environment. Production build, mobile export, rendered-page HTTP smoke, and real HTTP E2E passed, but the four-device presentation should still receive a short physical-device rehearsal.
 - PostgreSQL cannot express the cross-column primary-versus-reassigned exclusion as the existing pair of exclusion constraints; application transactions and regression tests enforce that remaining invariant.
 
-Confidence: **HIGH** for the hardened repository and guarded local demo. Production confidence remains below very high until the single Neon ledger mismatch and exposed database credential are reconciled.
+Confidence: **HIGH** for the hardened repository and guarded local demo. Production confidence remains below very high until the exposed database credential is reconciled.

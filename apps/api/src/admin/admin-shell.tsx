@@ -5,22 +5,42 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 
 import { adminApi } from "./api";
-import type { AdminUser } from "./types";
+import type { AdminUser, AffectedBooking, Paginated, RechargeRequest } from "./types";
 
-const navItems = [
-  ["dashboard", "Dashboard"],
-  ["vehicles", "Vehicles"],
-  ["flats", "Flats"],
-  ["residents", "Residents"],
-  ["quota", "Quota"],
-  ["bookings", "Bookings"],
-  ["vehicle-status", "Vehicle Status"],
-  ["drivers", "Drivers"],
-  ["wallets", "Wallets"],
-  ["society-qr", "Society QR"],
-  ["recharge-requests", "Recharge Requests"],
-  ["cancellation-settings", "Cancellation Settings"],
-  ["affected-bookings", "Affected Bookings"],
+const navGroups = [
+  {
+    label: "OPERATE",
+    items: [
+      ["dashboard", "Dashboard", null],
+      ["bookings", "Bookings", null],
+      ["vehicle-status", "Vehicle Status", null],
+      ["affected-bookings", "Affected Bookings", "affected"],
+    ],
+  },
+  {
+    label: "FLEET",
+    items: [
+      ["vehicles", "Vehicles", null],
+      ["drivers", "Drivers", null],
+    ],
+  },
+  {
+    label: "SOCIETY",
+    items: [
+      ["flats", "Flats", null],
+      ["residents", "Residents", null],
+      ["quota", "Quota", null],
+    ],
+  },
+  {
+    label: "MONEY",
+    items: [
+      ["wallets", "Wallets", null],
+      ["recharge-requests", "Recharge Requests", "recharges"],
+      ["society-qr", "Society QR", null],
+      ["cancellation-settings", "Cancellation Settings", null],
+    ],
+  },
 ] as const;
 
 const AdminUserContext = createContext<AdminUser | null>(null);
@@ -29,11 +49,24 @@ export function useAdminUser() {
   return useContext(AdminUserContext);
 }
 
+function initialsFor(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [badges, setBadges] = useState<{ affected: number; recharges: number }>({
+    affected: 0,
+    recharges: 0,
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -63,6 +96,44 @@ export function AdminShell({ children }: { children: ReactNode }) {
     };
   }, [router]);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let mounted = true;
+
+    function loadBadges() {
+      Promise.all([
+        adminApi<AffectedBooking[]>("/admin/bookings/affected").catch(() => []),
+        adminApi<Paginated<RechargeRequest>>("/admin/recharge-requests?status=PENDING").catch(
+          () => null,
+        ),
+      ]).then(([affected, recharges]) => {
+        if (!mounted) {
+          return;
+        }
+        setBadges({
+          affected: affected.length,
+          recharges: recharges?.items.length ?? 0,
+        });
+      });
+    }
+
+    // AdminShell stays mounted while navigating between "[section]" pages
+    // (Dashboard, Bookings, Vehicles, ...), so a one-shot fetch here would
+    // leave these counts stale after an admin resolves an item without
+    // leaving that page template. Poll instead of wiring a reload callback
+    // through every mutating action across every admin screen.
+    loadBadges();
+    const interval = setInterval(loadBadges, 20_000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [user]);
+
   async function logout() {
     await adminApi("/auth/admin/logout", { method: "POST" }).catch(() => null);
     router.replace("/admin/login");
@@ -79,6 +150,9 @@ export function AdminShell({ children }: { children: ReactNode }) {
     );
   }
 
+  const badgeCount = (key: string | null) =>
+    key === "affected" ? badges.affected : key === "recharges" ? badges.recharges : 0;
+
   return (
     <AdminUserContext.Provider value={user}>
     <div className="admin-shell">
@@ -87,25 +161,40 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <div className="brand-mark">EV</div>
           <div>
             <strong>Society EV</strong>
-            <span>{user?.society.name ?? "Admin Portal"}</span>
+            <span>{user?.society.name ?? "Admin console"}</span>
           </div>
         </div>
 
         <nav className="nav">
-          {navItems.map(([section, label]) => {
-            const href = `/admin/${section}`;
-            const active = pathname === href || pathname.startsWith(`${href}/`);
+          {navGroups.map((group) => (
+            <div key={group.label}>
+              <div className="nav-group-label">{group.label}</div>
+              {group.items.map(([section, label, badgeKey]) => {
+                const href = `/admin/${section}`;
+                const active = pathname === href || pathname.startsWith(`${href}/`);
+                const count = badgeCount(badgeKey);
 
-            return (
-              <Link className={active ? "active" : ""} href={href} key={section}>
-                {label}
-              </Link>
-            );
-          })}
+                return (
+                  <Link className={active ? "active" : ""} href={href} key={section}>
+                    <span>{label}</span>
+                    {count > 0 ? (
+                      <span className={`nav-badge${badgeKey === "affected" ? " danger" : ""}`}>
+                        {count}
+                      </span>
+                    ) : null}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="sidebar-footer">
-          <span>Signed in as {user?.name ?? "Admin"}</span>
+          <div className="sidebar-footer-avatar">{initialsFor(user?.name ?? "Admin")}</div>
+          <div className="sidebar-footer-info">
+            <strong>{user?.name ?? "Admin"}</strong>
+            <span>Trustee</span>
+          </div>
           <button className="button secondary" onClick={() => void logout()}>
             Logout
           </button>

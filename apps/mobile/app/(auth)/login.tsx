@@ -1,10 +1,12 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -15,7 +17,7 @@ import { Screen } from "@/src/components/screen";
 import { TextField } from "@/src/components/text-field";
 import { errorMessage } from "@/src/lib/api";
 import { useAuthStore } from "@/src/store/auth";
-import { colors, spacing } from "@/src/theme";
+import { colors, radius, spacing } from "@/src/theme";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -28,6 +30,8 @@ export default function LoginScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [isDriver, setIsDriver] = useState(false);
   const pending = login.isPending || driverLoginQuery.isPending;
+  const societyIdRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   const submit = async () => {
     if (pending) return;
@@ -55,31 +59,63 @@ export default function LoginScreen() {
     }
   };
 
+  const switchRole = (driver: boolean) => {
+    if (driver === isDriver) return;
+    setIsDriver(driver);
+    setSocietyId("");
+    setFlatNumber("");
+    setPassword("");
+    setMessage(null);
+  };
+
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={styles.flex}
     >
       <Screen scroll style={styles.screen}>
-        <View style={styles.brand}>
+        <Card style={styles.form}>
           <View style={styles.logo}>
             <Text style={styles.logoText}>EV</Text>
           </View>
-          <Text style={styles.title}>Your society car, when you need it.</Text>
+          <Text style={styles.title}>Sign in</Text>
           <Text style={styles.subtitle}>
             Reserve an electric vehicle and keep track of your weekly quota.
           </Text>
-        </View>
 
-        <Card style={styles.form}>
-          <Text style={styles.formTitle}>
-            {isDriver ? "Driver login" : "Resident login"}
-          </Text>
+          <View style={styles.segment}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: !isDriver }}
+              onPress={() => switchRole(false)}
+              style={[styles.segmentItem, !isDriver && styles.segmentItemActive]}
+            >
+              <Text style={[styles.segmentLabel, !isDriver && styles.segmentLabelActive]}>
+                Resident
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: isDriver }}
+              onPress={() => switchRole(true)}
+              style={[styles.segmentItem, isDriver && styles.segmentItemActive]}
+            >
+              <Text style={[styles.segmentLabel, isDriver && styles.segmentLabelActive]}>
+                Driver
+              </Text>
+            </Pressable>
+          </View>
+
           <TextField
-            autoCapitalize="characters"
+            autoCapitalize={isDriver ? "none" : "characters"}
+            autoComplete={isDriver ? "tel" : "off"}
             autoCorrect={false}
+            keyboardType={isDriver ? "phone-pad" : "default"}
             label={isDriver ? "Phone number" : "Flat number"}
             onChangeText={setFlatNumber}
+            onSubmitEditing={() =>
+              (isDriver ? passwordRef : societyIdRef).current?.focus()
+            }
             placeholder={isDriver ? "Enter phone" : "A101"}
             returnKeyType="next"
             value={flatNumber}
@@ -90,38 +126,38 @@ export default function LoginScreen() {
               autoCorrect={false}
               label="Society ID (if required)"
               onChangeText={setSocietyId}
+              onSubmitEditing={() => passwordRef.current?.focus()}
               placeholder="Enter society ID"
+              ref={societyIdRef}
+              returnKeyType="next"
               value={societyId}
             />
           )}
           <TextField
+            autoComplete="password"
             label="Password"
             onChangeText={setPassword}
             onSubmitEditing={() => void submit()}
             placeholder="Enter your password"
+            ref={passwordRef}
             returnKeyType="done"
             secureTextEntry
+            textContentType="password"
             value={password}
           />
           {message ? <Text style={styles.error}>{message}</Text> : null}
           <Button
             disabled={pending || !flatNumber.trim() || password.length < 8}
-            label="Login"
+            label="Log in"
             loading={pending}
             onPress={() => void submit()}
           />
-          <Button
-            disabled={pending}
-            label={isDriver ? "Switch to Resident" : "Login as Driver"}
-            variant="secondary"
-            onPress={() => {
-              setIsDriver(!isDriver);
-              setSocietyId("");
-              setFlatNumber("");
-              setPassword("");
-              setMessage(null);
-            }}
-          />
+          {!isDriver ? (
+            <Text style={styles.hint}>
+              Society ID is only needed if your flat number exists in more
+              than one society.
+            </Text>
+          ) : null}
         </Card>
       </Screen>
     </KeyboardAvoidingView>
@@ -138,42 +174,70 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: spacing.xl,
   },
-  brand: {
-    gap: spacing.sm,
-  },
   logo: {
-    width: 58,
-    height: 58,
+    width: 48,
+    height: 48,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 18,
+    borderRadius: radius.lg,
     backgroundColor: colors.primary,
   },
   logoText: {
     color: colors.surface,
-    fontSize: 20,
-    fontWeight: "900",
+    fontSize: 16,
+    fontWeight: "700",
   },
   title: {
-    maxWidth: 420,
     color: colors.text,
-    fontSize: 34,
-    fontWeight: "900",
-    lineHeight: 40,
+    fontSize: 27,
+    fontWeight: "700",
+    marginTop: 20,
+    letterSpacing: -0.3,
   },
   subtitle: {
-    maxWidth: 480,
     color: colors.textMuted,
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: 14.5,
+    lineHeight: 21,
+    marginTop: 6,
   },
   form: {
     gap: spacing.md,
+    maxWidth: 420,
+    width: "100%",
+    alignSelf: "center",
+    padding: 32,
   },
-  formTitle: {
+  segment: {
+    flexDirection: "row",
+    gap: 4,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    padding: 4,
+    marginTop: 4,
+  },
+  segmentItem: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.sm,
+  },
+  segmentItemActive: {
+    backgroundColor: colors.surface,
+  },
+  segmentLabel: {
+    color: colors.textMuted,
+    fontSize: 13.5,
+    fontWeight: "600",
+  },
+  segmentLabelActive: {
     color: colors.text,
-    fontSize: 22,
-    fontWeight: "900",
+  },
+  hint: {
+    color: colors.textFaint,
+    fontSize: 12.5,
+    lineHeight: 18,
+    textAlign: "center",
   },
   error: {
     color: colors.danger,

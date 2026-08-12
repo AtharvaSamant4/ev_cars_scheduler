@@ -23,7 +23,7 @@ export function Screen({
 }: ScreenProps) {
   if (scroll) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+      <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
         <ScrollView
           contentContainerStyle={[styles.content, style]}
           keyboardShouldPersistTaps="handled"
@@ -36,7 +36,7 @@ export function Screen({
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <View style={[styles.content, styles.flex, style]} {...props}>
         {children}
       </View>

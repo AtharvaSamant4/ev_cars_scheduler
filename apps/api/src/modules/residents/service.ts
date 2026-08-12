@@ -1,8 +1,9 @@
-import { BookingStatus, prisma, UserRole } from "@society-ev/db";
+import { prisma, UserRole } from "@society-ev/db";
 
 import type { AuthUser } from "@/src/lib/auth";
 import { AppError } from "@/src/lib/errors";
 import {
+  activeBookingFilter,
   bookingResponse,
   residentFlatId,
 } from "@/src/modules/bookings/service";
@@ -58,8 +59,7 @@ export async function getDashboard(user: AuthUser) {
     prisma.booking.findMany({
       where: {
         flatId: user.flatId!,
-        status: { notIn: [BookingStatus.CANCELLED, BookingStatus.COMPLETED] },
-        endTime: { gt: new Date() },
+        ...activeBookingFilter(new Date()),
       },
       include: {
         vehicle: {

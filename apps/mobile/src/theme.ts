@@ -1,20 +1,34 @@
+import { Platform } from "react-native";
+
 export const colors = {
-  background: "#F3F6F4",
+  background: "#F3F4F0",
   surface: "#FFFFFF",
-  surfaceMuted: "#E8F0EB",
-  primary: "#145C3A",
-  primaryDark: "#0D4028",
-  primarySoft: "#DCEEE4",
-  accent: "#D8A42A",
-  text: "#17211B",
-  textMuted: "#66736B",
-  border: "#DCE4DF",
-  danger: "#B42318",
-  dangerSoft: "#FDE8E7",
-  success: "#18794E",
-  successSoft: "#DFF4E8",
-  warning: "#8A5B00",
-  warningSoft: "#FFF1CC",
+  surfaceMuted: "#EAEBE6",
+  primary: "#12503A",
+  primaryDark: "#0E3E2D",
+  primaryHover: "#1A6B4D",
+  primarySoft: "#E4EFE9",
+  ink: "#121513",
+  inkSoft: "#1E2521",
+  inkBorder: "#2A322D",
+  accent: "#F7C561",
+  text: "#121513",
+  textMuted: "#6C736E",
+  textFaint: "#8C938E",
+  border: "#E5E7E2",
+  borderStrong: "#C9CFC9",
+  danger: "#B3251E",
+  dangerSoft: "#FBE7E4",
+  dangerBorder: "#EBC4C0",
+  success: "#0B7A4E",
+  successSoft: "#E4EFE9",
+  live: "#0B7A4E",
+  liveDot: "#8CF0BE",
+  warning: "#7A4900",
+  warningSoft: "#FBEFD6",
+  warningBorder: "#E4C489",
+  info: "#1E5B8F",
+  infoSoft: "#E3EDF6",
 };
 
 export const spacing = {
@@ -26,9 +40,11 @@ export const spacing = {
 };
 
 export const radius = {
+  xs: 8,
   sm: 10,
-  md: 16,
-  lg: 24,
+  md: 14,
+  lg: 18,
+  xl: 22,
   pill: 999,
 };
 
@@ -37,6 +53,7 @@ export const fonts = {
   medium: undefined,
   semiBold: undefined,
   bold: undefined,
+  mono: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
 };
 
 export const shadows = {

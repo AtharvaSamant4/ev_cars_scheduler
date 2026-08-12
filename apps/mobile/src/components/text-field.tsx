@@ -6,6 +6,7 @@ import {
   View,
   type TextInputProps,
 } from "react-native";
+import { forwardRef } from "react";
 import type { ChangeEvent, CSSProperties } from "react";
 
 import { colors, radius, spacing } from "@/src/theme";
@@ -16,7 +17,10 @@ type TextFieldProps = TextInputProps & {
   type?: string;
 };
 
-export function TextField({ label, hint, style, type, ...props }: TextFieldProps) {
+export const TextField = forwardRef<TextInput, TextFieldProps>(function TextField(
+  { label, hint, style, type, ...props },
+  ref,
+) {
   return (
     <View style={styles.group}>
       <Text style={styles.label}>{label}</Text>
@@ -29,7 +33,7 @@ export function TextField({ label, hint, style, type, ...props }: TextFieldProps
             minHeight: 52,
             borderWidth: 1,
             borderStyle: "solid",
-            borderColor: colors.border,
+            borderColor: colors.borderStrong,
             borderRadius: radius.md,
             backgroundColor: colors.surface,
             color: colors.text,
@@ -48,6 +52,7 @@ export function TextField({ label, hint, style, type, ...props }: TextFieldProps
         />
       ) : (
         <TextInput
+          ref={ref}
           accessibilityLabel={label}
           placeholderTextColor={colors.textMuted}
           style={[styles.input, style]}
@@ -57,7 +62,7 @@ export function TextField({ label, hint, style, type, ...props }: TextFieldProps
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   group: {
@@ -71,7 +76,7 @@ const styles = StyleSheet.create({
   input: {
     minHeight: 52,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     borderRadius: radius.md,
     backgroundColor: colors.surface,
     color: colors.text,

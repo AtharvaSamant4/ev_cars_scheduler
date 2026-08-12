@@ -8,9 +8,8 @@ import { EmptyState, ErrorState, LoadingState } from "@/src/components/states";
 import { apiRequest, errorMessage } from "@/src/lib/api";
 import { bookingDate, bookingTime } from "@/src/lib/format";
 import { useAuthStore } from "@/src/store/auth";
-import { colors, fonts, shadows } from "@/src/theme";
+import { colors, radius } from "@/src/theme";
 import type { Notification } from "@/src/types/api";
-import { Ionicons } from "@expo/vector-icons";
 
 export default function NotificationsTab() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -85,7 +84,7 @@ export default function NotificationsTab() {
   }
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.container}>
+    <SafeAreaView edges={["top", "left", "right"]} style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Alerts</Text>
       </View>
@@ -116,25 +115,25 @@ export default function NotificationsTab() {
               key={notification.id}
               style={[
                 styles.notificationCard,
-                !notification.read && styles.unreadCard,
+                notification.read && styles.readCard,
               ]}
             >
-              <View style={styles.iconContainer}>
-                <Ionicons
-                  name={notification.read ? "notifications-outline" : "notifications"}
-                  size={24}
-                  color={notification.read ? colors.textMuted : colors.primary}
-                />
-              </View>
-              <View style={styles.contentContainer}>
-                <Text style={styles.notificationTitle}>{notification.title}</Text>
-                <Text style={styles.notificationMessage}>{notification.message}</Text>
-                <Text style={styles.notificationTime}>
-                  {bookingDate(notification.createdAt, timezone)} ·{" "}
-                  {bookingTime(notification.createdAt, timezone)}
+              <View style={styles.topRow}>
+                <Text
+                  style={[
+                    styles.notificationTitle,
+                    notification.read && styles.readTitle,
+                  ]}
+                >
+                  {notification.title}
                 </Text>
+                {notification.read ? <Text style={styles.readTag}>read</Text> : null}
               </View>
-              {!notification.read && <View style={styles.unreadDot} />}
+              <Text style={styles.notificationMessage}>{notification.message}</Text>
+              <Text style={styles.notificationTime}>
+                {bookingDate(notification.createdAt, timezone)} ·{" "}
+                {bookingTime(notification.createdAt, timezone)}
+              </Text>
             </View>
           ))
         )}
@@ -157,52 +156,51 @@ const styles = StyleSheet.create({
   },
   title: {
     color: colors.text,
-    fontFamily: fonts.bold,
-    fontSize: 28,
+    fontSize: 24,
+    fontWeight: "700",
+    letterSpacing: -0.2,
   },
   notificationCard: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    marginBottom: 10,
+    padding: 15,
+  },
+  readCard: {
+    backgroundColor: "#F8F9F6",
+    opacity: 0.86,
+  },
+  topRow: {
     flexDirection: "row",
-    marginBottom: 12,
-    padding: 16,
-    ...shadows.sm,
-  },
-  unreadCard: {
-    backgroundColor: colors.primary + "10",
-  },
-  iconContainer: {
-    marginRight: 16,
-    marginTop: 2,
-  },
-  contentContainer: {
-    flex: 1,
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
   },
   notificationTitle: {
+    flex: 1,
     color: colors.text,
-    fontFamily: fonts.semiBold,
-    fontSize: 16,
-    marginBottom: 4,
+    fontSize: 14.5,
+    fontWeight: "600",
+  },
+  readTitle: {
+    color: colors.textMuted,
+  },
+  readTag: {
+    color: colors.textFaint,
+    fontSize: 11,
   },
   notificationMessage: {
-    color: colors.text,
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 8,
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 19.5,
+    marginTop: 6,
   },
   notificationTime: {
-    color: colors.textMuted,
-    fontFamily: fonts.medium,
-    fontSize: 12,
-  },
-  unreadDot: {
-    backgroundColor: colors.primary,
-    borderRadius: 4,
-    height: 8,
-    marginLeft: 8,
-    marginTop: 8,
-    width: 8,
+    color: colors.textFaint,
+    fontSize: 11.5,
+    marginTop: 9,
   },
   errorBanner: {
     backgroundColor: colors.dangerSoft,
@@ -213,7 +211,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: colors.danger,
-    fontFamily: fonts.medium,
+    fontWeight: "600",
     fontSize: 14,
   },
 });

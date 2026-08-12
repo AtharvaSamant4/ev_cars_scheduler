@@ -56,6 +56,48 @@ const ACTIVE_PRE_START_STATUSES: BookingStatus[] = [
 
 const CANCELLABLE_STATUSES = new Set(ACTIVE_PRE_START_STATUSES);
 
+const TERMINAL_STATUSES: BookingStatus[] = [
+  BookingStatus.CANCELLED,
+  BookingStatus.COMPLETED,
+];
+
+/**
+ * Statuses where the trip is physically underway: the driver has been
+ * dispatched and is waiting on the resident's OTP, or the ride is running.
+ *
+ * These must keep counting as "upcoming" past the scheduled endTime. Filtering
+ * purely on `endTime > now` drops a late-running ride out of the resident's
+ * live view and files it under history while the car is still out, which is
+ * exactly when they most need to see it -- and late returns are an expected
+ * case here, since there is a LATE_RETURN_PER_HOUR penalty rule for them.
+ */
+const IN_FLIGHT_STATUSES: BookingStatus[] = [
+  BookingStatus.OTP_PENDING,
+  BookingStatus.IN_PROGRESS,
+  BookingStatus.ACTIVE,
+];
+
+/** Bookings a resident should still consider live. */
+export function activeBookingFilter(now: Date): Prisma.BookingWhereInput {
+  return {
+    status: { notIn: TERMINAL_STATUSES },
+    OR: [{ endTime: { gt: now } }, { status: { in: IN_FLIGHT_STATUSES } }],
+  };
+}
+
+/** Strict complement of {@link activeBookingFilter}. */
+function settledBookingFilter(now: Date): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { status: { in: TERMINAL_STATUSES } },
+      {
+        endTime: { lte: now },
+        status: { notIn: [...TERMINAL_STATUSES, ...IN_FLIGHT_STATUSES] },
+      },
+    ],
+  };
+}
+
 const driverActionInclude = {
   vehicle: true,
   reassignedVehicle: true,
@@ -354,7 +396,7 @@ export async function checkAvailability(
   const range = normalizeBookingRange(startValue, endValue, timezone, user.role);
   await ensureWeeklyQuotaHorizon(flatId, user.societyId, range.startTime);
 
-  const [quota, availableVehicles] = await Promise.all([
+  const [quota, availableVehicles, wallet] = await Promise.all([
     prisma.flatQuota.findUnique({
       where: {
         flatId_year_weekNumber: {
@@ -394,10 +436,15 @@ export async function checkAvailability(
         id: true,
         name: true,
         registrationNumber: true,
+        hourlyRate: true,
       },
       orderBy: {
         name: "asc",
       },
+    }),
+    prisma.wallet.findUnique({
+      where: { userId: user.id },
+      select: { balance: true },
     }),
   ]);
 
@@ -405,13 +452,29 @@ export async function checkAvailability(
     ? quota.allocatedMinutes - quota.usedMinutes
     : 0;
   const availableVehicleCount = availableVehicles.length;
+  const walletBalance = wallet?.balance ?? 0;
+
+  // Mirrors the charge createBooking applies, so the price shown before
+  // confirming is the price actually debited.
+  const pricedVehicles = availableVehicles.map((vehicle) => {
+    const estimatedCost = Math.round(
+      (range.durationMinutes / 60) * vehicle.hourlyRate,
+    );
+
+    return {
+      ...vehicle,
+      estimatedCost,
+      affordable: walletBalance >= estimatedCost,
+    };
+  });
 
   return {
     available:
       availableVehicleCount > 0 &&
       remainingMinutes >= range.durationMinutes,
     availableVehicleCount,
-    availableVehicles,
+    availableVehicles: pricedVehicles,
+    walletBalance,
     durationMinutes: range.durationMinutes,
     quota: {
       year: range.quotaYear,
@@ -609,17 +672,8 @@ export async function listResidentBookings(
   const where: Prisma.BookingWhereInput = {
     flatId,
     ...(view === "upcoming"
-      ? {
-          status: { notIn: [BookingStatus.CANCELLED, BookingStatus.COMPLETED] },
-          endTime: { gt: now },
-        }
-      : {
-          OR: [
-            { status: BookingStatus.CANCELLED },
-            { status: BookingStatus.COMPLETED },
-            { endTime: { lte: now } },
-          ],
-        }),
+      ? activeBookingFilter(now)
+      : settledBookingFilter(now)),
   };
 
   const [items, total] = await prisma.$transaction([

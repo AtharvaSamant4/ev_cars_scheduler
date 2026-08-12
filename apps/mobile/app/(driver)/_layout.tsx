@@ -1,9 +1,8 @@
-import { Ionicons } from "@expo/vector-icons";
 import { Redirect, Tabs } from "expo-router";
 
 import { LoadingState } from "@/src/components/states";
+import { TabBar } from "@/src/components/tab-bar";
 import { useAuthStore } from "@/src/store/auth";
-import { colors } from "@/src/theme";
 
 export default function DriverLayout() {
   const hydrated = useAuthStore((state) => state.hydrated);
@@ -24,41 +23,12 @@ export default function DriverLayout() {
 
   return (
     <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: {
-          height: 68,
-          paddingTop: 8,
-          paddingBottom: 8,
-          borderTopColor: colors.border,
-          backgroundColor: colors.surface,
-        },
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: "700",
-        },
-      }}
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <TabBar {...props} />}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Home",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons color={color} name="home-outline" size={size} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="history"
-        options={{
-          title: "History",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons color={color} name="calendar-outline" size={size} />
-          ),
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: "Jobs" }} />
+      <Tabs.Screen name="history" options={{ title: "History" }} />
+      <Tabs.Screen name="vehicle" options={{ title: "Vehicle" }} />
     </Tabs>
   );
 }

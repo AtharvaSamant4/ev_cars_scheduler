@@ -24,17 +24,7 @@
       "bundler": "metro",
       "output": "single"
     },
-    "plugins": [
-      "expo-router",
-      "expo-secure-store",
-      "expo-font",
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow Society EV to access your camera to scan society QR codes."
-        }
-      ]
-    ],
+    "plugins": ["expo-router", "expo-secure-store", "expo-font"],
     "experiments": {
       "typedRoutes": true
     }

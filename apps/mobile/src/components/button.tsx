@@ -11,7 +11,7 @@ import { colors, radius, spacing } from "@/src/theme";
 type ButtonProps = PressableProps & {
   label: string;
   loading?: boolean;
-  variant?: "primary" | "secondary" | "danger";
+  variant?: "primary" | "secondary" | "danger" | "dangerOutline";
 };
 
 export function Button({
@@ -31,7 +31,7 @@ export function Button({
       style={(state) => [
         styles.base,
         styles[variant],
-        state.pressed && !isDisabled && styles.pressed,
+        state.pressed && !isDisabled && stylesPressed[variant],
         isDisabled && styles.disabled,
         typeof style === "function" ? style(state) : style,
       ]}
@@ -39,13 +39,16 @@ export function Button({
     >
       {loading ? (
         <ActivityIndicator
-          color={variant === "secondary" ? colors.primary : colors.surface}
+          color={
+            variant === "secondary" ? colors.primary : variant === "dangerOutline" ? colors.danger : colors.surface
+          }
         />
       ) : (
         <Text
           style={[
             styles.label,
             variant === "secondary" && styles.secondaryLabel,
+            variant === "dangerOutline" && styles.dangerOutlineLabel,
           ]}
         >
           {label}
@@ -67,25 +70,45 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   secondary: {
-    backgroundColor: colors.primarySoft,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.borderStrong,
   },
   danger: {
     backgroundColor: colors.danger,
   },
+  dangerOutline: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+  },
   label: {
     color: colors.surface,
-    fontSize: 16,
+    fontSize: 15.5,
     fontWeight: "700",
   },
   secondaryLabel: {
-    color: colors.primary,
+    color: colors.text,
   },
-  pressed: {
-    opacity: 0.85,
+  dangerOutlineLabel: {
+    color: colors.danger,
   },
   disabled: {
     opacity: 0.55,
+  },
+});
+
+const stylesPressed = StyleSheet.create({
+  primary: {
+    backgroundColor: colors.primaryHover,
+  },
+  secondary: {
+    backgroundColor: colors.surfaceMuted,
+  },
+  danger: {
+    opacity: 0.88,
+  },
+  dangerOutline: {
+    backgroundColor: colors.dangerSoft,
   },
 });
