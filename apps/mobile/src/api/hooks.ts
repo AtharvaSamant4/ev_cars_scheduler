@@ -135,14 +135,16 @@ export function useDriverHistory() {
   });
 }
 
-export function useReportIssue(bookingId: string) {
+export function useReportIssue(bookingId?: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: () =>
       apiRequest<{ success: boolean }>("/driver/vehicle/report-issue", {
         method: "POST",
-        body: JSON.stringify({ bookingId }),
+        // Omitted entirely when the driver has no active job, so the server
+        // falls back to their assigned vehicle.
+        body: JSON.stringify(bookingId ? { bookingId } : {}),
       }),
     onSuccess: async () => {
       await Promise.all([

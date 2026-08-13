@@ -451,7 +451,7 @@ export async function getDriverHistory(user: AuthUser) {
 
 export async function reportAssignedVehicleIssue(
   user: AuthUser,
-  bookingId: string,
+  bookingId?: string,
 ) {
   if (user.role !== UserRole.DRIVER) {
     throw new AppError(403, "FORBIDDEN", "Only drivers can report vehicle issues");
@@ -462,22 +462,27 @@ export async function reportAssignedVehicleIssue(
 
   return prisma.$transaction(
     async (tx) => {
-      const booking = await tx.booking.findFirst({
-        where: { id: bookingId, societyId: user.societyId },
-        select: {
-          id: true,
-          driverId: true,
-          vehicleId: true,
-          reassignedVehicleId: true,
-          vehicle: { select: vehicleSelect },
-          reassignedVehicle: { select: vehicleSelect },
-        },
-      });
+      // A breakdown can happen while the driver is idle, so a booking is
+      // optional. Without one the driver's own assigned vehicle is taken out of
+      // service and any pre-start bookings against it are flagged the same way.
+      const booking = bookingId
+        ? await tx.booking.findFirst({
+            where: { id: bookingId, societyId: user.societyId },
+            select: {
+              id: true,
+              driverId: true,
+              vehicleId: true,
+              reassignedVehicleId: true,
+              vehicle: { select: vehicleSelect },
+              reassignedVehicle: { select: vehicleSelect },
+            },
+          })
+        : null;
 
-      if (!booking) {
+      if (bookingId && !booking) {
         throw new AppError(404, "NOT_FOUND", "Booking not found");
       }
-      if (booking.driverId !== driver.id) {
+      if (booking && booking.driverId !== driver.id) {
         throw new AppError(
           403,
           "FORBIDDEN",
@@ -485,32 +490,44 @@ export async function reportAssignedVehicleIssue(
         );
       }
 
-      const claimed = await tx.booking.updateMany({
-        where: {
-          id: booking.id,
-          societyId: user.societyId,
-          driverId: driver.id,
-          status: { in: [...preStartBookingStatuses] },
-        },
-        data: {
-          status: BookingStatus.AT_RISK,
-          otp: null,
-          otpGeneratedAt: null,
-          otpExpiresAt: null,
-          otpAttempts: 0,
-          otpVerified: false,
-          otpVerifiedAt: null,
-        },
-      });
-      if (claimed.count !== 1) {
-        throw new AppError(
-          409,
-          "INVALID_STATUS",
-          "Vehicle issues can only be reported before the ride starts",
-        );
+      if (booking) {
+        const claimed = await tx.booking.updateMany({
+          where: {
+            id: booking.id,
+            societyId: user.societyId,
+            driverId: driver.id,
+            status: { in: [...preStartBookingStatuses] },
+          },
+          data: {
+            status: BookingStatus.AT_RISK,
+            otp: null,
+            otpGeneratedAt: null,
+            otpExpiresAt: null,
+            otpAttempts: 0,
+            otpVerified: false,
+            otpVerifiedAt: null,
+          },
+        });
+        if (claimed.count !== 1) {
+          throw new AppError(
+            409,
+            "INVALID_STATUS",
+            "Vehicle issues can only be reported before the ride starts",
+          );
+        }
       }
 
-      const vehicle = booking.reassignedVehicle ?? booking.vehicle;
+      const vehicle = booking
+        ? (booking.reassignedVehicle ?? booking.vehicle)
+        : driver.vehicle;
+
+      if (!vehicle) {
+        throw new AppError(
+          409,
+          "NO_VEHICLE_ASSIGNED",
+          "You do not have a vehicle assigned to report an issue for",
+        );
+      }
       const marked = await tx.vehicle.updateMany({
         where: {
           id: vehicle.id,
@@ -543,7 +560,11 @@ export async function reportAssignedVehicleIssue(
               ],
             },
             {
-              OR: [{ id: booking.id }, { startTime: { gt: now } }],
+              // The reported booking counts even if it has already started;
+              // otherwise only slots still ahead of us are impacted.
+              OR: booking
+                ? [{ id: booking.id }, { startTime: { gt: now } }]
+                : [{ startTime: { gt: now } }],
             },
           ],
         },
@@ -579,7 +600,7 @@ export async function reportAssignedVehicleIssue(
 
       return {
         success: true,
-        bookingId: booking.id,
+        bookingId: booking?.id ?? null,
         affectedBookingsCount: affectedBookings.length,
         vehicle: updatedVehicle,
       };

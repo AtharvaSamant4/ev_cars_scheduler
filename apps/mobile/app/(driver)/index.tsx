@@ -352,7 +352,7 @@ function OtpEntryView({ trip, onCancel }: { trip: DriverTrip; onCancel: () => vo
         </Text>
       </View>
 
-      <Pressable accessibilityRole="button" onPress={focusInput} style={styles.otpBoxRow}>
+      <View style={styles.otpBoxRow}>
         {boxes.map((i) => (
           <View
             key={i}
@@ -361,12 +361,13 @@ function OtpEntryView({ trip, onCancel }: { trip: DriverTrip; onCancel: () => vo
             <Text style={styles.otpDigitText}>{otp[i] ?? ""}</Text>
           </View>
         ))}
-      </Pressable>
-      <TextInputBridge
-        ref={inputRef}
-        value={otp}
-        onChangeText={(v) => setOtp(v.replace(/\D/g, "").slice(0, 6))}
-      />
+        {/* Rendered last so it sits above the boxes and receives the tap. */}
+        <TextInputBridge
+          ref={inputRef}
+          value={otp}
+          onChangeText={(v) => setOtp(v.replace(/\D/g, "").slice(0, 6))}
+        />
+      </View>
 
       {verify.isError ? (
         <View style={styles.otpErrorBanner}>
@@ -412,10 +413,15 @@ const TextInputBridge = forwardRef<
     <TextInput
       ref={ref}
       autoFocus
+      caretHidden
       keyboardType="number-pad"
       maxLength={6}
       onChangeText={onChangeText}
-      style={{ height: 0, width: 0, opacity: 0 }}
+      // Transparent, but stretched over the digit boxes rather than sized 0x0.
+      // Android refuses to raise the soft keyboard for a zero-sized input, so
+      // the keypad only appeared once switching tabs forced a remount. At full
+      // size it is also the tap target, so no separate focus handler is needed.
+      style={[StyleSheet.absoluteFillObject, styles.otpHiddenInput]}
       value={value}
     />
   );
@@ -424,7 +430,10 @@ const TextInputBridge = forwardRef<
 function ActiveTripView({ trip, onRefresh }: { trip: DriverTrip; onRefresh: () => void }) {
   const complete = useCompleteTrip(trip.id);
   const reportIssue = useReportIssue(trip.id);
-  const elapsed = useElapsedLabel(trip.startTime);
+  // Measured from when the OTP was verified, not from the booked slot. Using
+  // the scheduled start meant a trip begun before its window showed a frozen
+  // 0:00:00 (the elapsed value is clamped at zero) until the slot came round.
+  const elapsed = useElapsedLabel(trip.actualRideStartTime ?? undefined);
 
   // Same reasoning as OtpEntryView: there's no sensible "back" destination
   // mid-ride, so swallow the hardware back press instead of letting Android
@@ -733,6 +742,7 @@ const styles = StyleSheet.create({
   otpTitle: { color: colors.text, fontSize: 24, fontWeight: "700", letterSpacing: -0.3 },
   otpSubtitle: { color: colors.textMuted, fontSize: 14, lineHeight: 20, marginTop: 6 },
   otpBoxRow: { flexDirection: "row", gap: 9 },
+  otpHiddenInput: { opacity: 0 },
   otpDigitBox: {
     flex: 1,
     height: 64,

@@ -111,6 +111,8 @@ export type DriverTrip = {
   id: string;
   startTime: string;
   endTime: string;
+  /** When the OTP was verified and the ride actually began. */
+  actualRideStartTime?: string | null;
   status: BookingStatus;
   effectiveStatus?: BookingStatus;
   user: {

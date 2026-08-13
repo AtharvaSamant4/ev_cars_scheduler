@@ -71,11 +71,10 @@ function VehicleCard({
   status: string;
   contextBookingId: string | undefined;
 }) {
-  const reportIssue = useReportIssue(contextBookingId ?? "");
+  const reportIssue = useReportIssue(contextBookingId);
   const ok = status === "AVAILABLE";
 
   const confirmBreakdown = () => {
-    if (!contextBookingId) return;
     confirmAction({
       title: `Report ${name} as broken down?`,
       message: `This marks ${registration} unavailable society-wide and alerts the office to arrange a reserve EV.`,
@@ -125,15 +124,20 @@ function VehicleCard({
             Use this only if the EV cannot be driven. It becomes unavailable society-wide and
             affected bookings are flagged for the office.
           </Text>
-          {contextBookingId ? (
-            <Pressable onPress={confirmBreakdown} style={styles.reportButton}>
-              <Text style={styles.reportButtonText}>Report breakdown</Text>
-            </Pressable>
-          ) : (
-            <Text style={styles.reportDisabledText}>
-              You need an active or upcoming job to report an issue.
+          <Pressable
+            accessibilityRole="button"
+            disabled={reportIssue.isPending}
+            onPress={confirmBreakdown}
+            style={({ pressed }) => [
+              styles.reportButton,
+              pressed && styles.reportButtonPressed,
+              reportIssue.isPending && styles.reportButtonDisabled,
+            ]}
+          >
+            <Text style={styles.reportButtonText}>
+              {reportIssue.isPending ? "Reporting..." : "Report breakdown"}
             </Text>
-          )}
+          </Pressable>
         </Card>
       ) : null}
     </>
@@ -202,13 +206,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  reportButtonPressed: {
+    backgroundColor: colors.dangerSoft,
+  },
+  reportButtonDisabled: {
+    opacity: 0.55,
+  },
   reportButtonText: {
     color: colors.danger,
     fontSize: 14.5,
     fontWeight: "600",
-  },
-  reportDisabledText: {
-    color: colors.textFaint,
-    fontSize: 12.5,
   },
 });

@@ -171,7 +171,9 @@ export const notificationReadSchema = z
   .strict();
 
 export const reportVehicleIssueSchema = z.object({
-  bookingId: z.string().uuid(),
+  // Optional: a breakdown can happen while the driver is idle, not only during
+  // an assigned trip. Without one, the driver's own assigned vehicle is used.
+  bookingId: z.string().uuid().optional(),
 });
 
 export const tripCompletionSchema = z.object({
