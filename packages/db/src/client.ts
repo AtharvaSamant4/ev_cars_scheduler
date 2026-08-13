@@ -17,8 +17,12 @@ function createPrismaClient() {
 
   const adapter = new PrismaPg({
     connectionString,
-    connectionTimeoutMillis: 15_000,
-    idleTimeoutMillis: 60_000,
+    // 15s outlived any caller's patience: a phone gave up long before the
+    // request did. Failing at 6s leaves room for the route-level retry to open
+    // a fresh connection (which also wakes a suspended serverless database)
+    // while still answering well inside a request the user is waiting on.
+    connectionTimeoutMillis: 6_000,
+    idleTimeoutMillis: 30_000,
     keepAlive: true,
     max: 10,
   });

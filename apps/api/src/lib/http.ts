@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { AppError, toAppError } from "./errors";
+import { AppError, connectionFailureMessage, toAppError } from "./errors";
+
+// A dropped connection means the query never committed: Postgres rolls back an
+// open transaction when its socket dies. Retrying is therefore safe, but only
+// for methods that are idempotent by definition -- replaying a POST could
+// double-charge a wallet, so those surface a 503 and let the caller decide.
+const RETRYABLE_METHODS = new Set(["GET", "HEAD"]);
+const MAX_CONNECTION_ATTEMPTS = 3;
+
+function connectionBackoffMs(attempt: number) {
+  return attempt * 120 + Math.floor(Math.random() * 80);
+}
 
 type RouteContext = {
   params: Promise<Record<string, string>>;
@@ -14,20 +25,37 @@ type RouteHandler = (
 
 export function apiRoute(handler: RouteHandler) {
   return async (request: NextRequest, context: RouteContext) => {
-    try {
-      return await handler(request, context);
-    } catch (error) {
-      const appError = toAppError(error);
-      return NextResponse.json(
-        {
-          error: {
-            code: appError.code,
-            message: appError.message,
-            details: appError.details,
+    const canRetry = RETRYABLE_METHODS.has(request.method);
+
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await handler(request, context);
+      } catch (error) {
+        if (
+          canRetry &&
+          attempt < MAX_CONNECTION_ATTEMPTS &&
+          connectionFailureMessage(error)
+        ) {
+          // Opening a fresh connection also wakes a suspended database, so this
+          // covers cold starts as well as dropped sockets and failovers.
+          await new Promise((resolve) =>
+            setTimeout(resolve, connectionBackoffMs(attempt)),
+          );
+          continue;
+        }
+
+        const appError = toAppError(error);
+        return NextResponse.json(
+          {
+            error: {
+              code: appError.code,
+              message: appError.message,
+              details: appError.details,
+            },
           },
-        },
-        { status: appError.status },
-      );
+          { status: appError.status },
+        );
+      }
     }
   };
 }

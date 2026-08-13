@@ -21,9 +21,14 @@ const ICONS: Record<string, { active: IoniconName; inactive: IoniconName }> = {
 
 export function TabBar({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
+  // Android 3-button navigation often reports a bottom inset of 0, which left
+  // the labels sitting a few pixels above the system buttons. The floor keeps a
+  // comfortable gap there without double-padding gesture-nav devices, which do
+  // report a real inset.
+  const bottomPadding = Math.max(insets.bottom, 16);
 
   return (
-    <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+    <View style={[styles.bar, { paddingBottom: bottomPadding }]}>
       {state.routes.map((route: any, index: number) => {
         const { options } = descriptors[route.key];
         const label = options.title ?? route.name;

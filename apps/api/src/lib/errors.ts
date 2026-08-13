@@ -13,6 +13,40 @@ export class AppError extends Error {
   }
 }
 
+// Transport-level failures reaching the database. These surface from the pg
+// driver rather than as a Prisma error code, so they cannot be matched on
+// `code` the way P2002 and friends are.
+const CONNECTION_FAILURE_PATTERNS = [
+  "Connection terminated",
+  "Connection ended",
+  "connection timeout",
+  "Can't reach database server",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "ENOTFOUND",
+];
+
+export function connectionFailureMessage(error: unknown) {
+  let current: unknown = error;
+
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (current instanceof Error) {
+      const matched = CONNECTION_FAILURE_PATTERNS.find((pattern) =>
+        current instanceof Error ? current.message.includes(pattern) : false,
+      );
+
+      if (matched) {
+        return current.message;
+      }
+    }
+
+    current = (current as { cause?: unknown } | null)?.cause;
+  }
+
+  return null;
+}
+
 export function toAppError(error: unknown) {
   if (error instanceof AppError) {
     return error;
@@ -51,6 +85,23 @@ export function toAppError(error: unknown) {
         "The service is temporarily busy. Please try again.",
       );
     }
+  }
+
+  const connectionFailure = connectionFailureMessage(error);
+  if (connectionFailure || error instanceof Prisma.PrismaClientInitializationError) {
+    // The database is unreachable, which is neither the caller's fault nor a
+    // bug in this request. Say so honestly and mark it retryable. Logged as a
+    // single line because the stack for a dropped socket carries no useful
+    // frames and floods the server output when a poll loop retries.
+    console.error(
+      `Database unreachable: ${connectionFailure ?? "client failed to initialize"}`,
+    );
+
+    return new AppError(
+      503,
+      "DATABASE_UNAVAILABLE",
+      "The service is temporarily unavailable. Please try again in a moment.",
+    );
   }
 
   console.error(error);
