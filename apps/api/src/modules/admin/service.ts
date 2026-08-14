@@ -436,10 +436,15 @@ export async function updateQuota(
     const existing = locked[0];
 
     if (existing && allocatedMinutes < existing.usedMinutes) {
+      // Naming the figures turns this from "computer says no" into something
+      // an admin can act on -- they can see how much is already committed.
+      const usedHours = Number((existing.usedMinutes / 60).toFixed(1));
+      const requestedHours = Number((allocatedMinutes / 60).toFixed(1));
+
       throw new AppError(
         409,
         "QUOTA_BELOW_USAGE",
-        "Allocated quota cannot be lower than used quota",
+        `This flat has already used ${usedHours} of this week's hours, so the allocation cannot be set to ${requestedHours}. Set it to ${usedHours} or higher.`,
       );
     }
 

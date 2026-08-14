@@ -376,7 +376,7 @@ export async function updateDriver(
       });
     }
 
-    return tx.driver.update({
+    const updated = await tx.driver.update({
       where: { id: driver.id },
       data: {
         fullName,
@@ -388,6 +388,63 @@ export async function updateDriver(
       },
       select: driverSelect,
     });
+
+    // A deactivated driver can no longer arrive, verify an OTP, or complete a
+    // trip, so any booking still assigned to them would silently stall: the
+    // resident keeps seeing "driver assigned" and waits for someone who is
+    // never coming. Surface those the same way a vehicle going out of service
+    // already does, and hand them back for reassignment.
+    if (isActive === false && driver.isActive) {
+      await releaseBookingsFromDriver(tx, user.societyId, driver.id);
+    }
+
+    return updated;
+  });
+}
+
+async function releaseBookingsFromDriver(
+  tx: Prisma.TransactionClient,
+  societyId: string,
+  driverId: string,
+) {
+  const stranded = await tx.booking.findMany({
+    where: {
+      societyId,
+      driverId,
+      status: { in: [...preStartBookingStatuses] },
+    },
+    select: { id: true, userId: true, startTime: true },
+  });
+
+  if (!stranded.length) {
+    return;
+  }
+
+  const society = await tx.society.findUniqueOrThrow({
+    where: { id: societyId },
+    select: { timezone: true },
+  });
+
+  await tx.booking.updateMany({
+    where: { id: { in: stranded.map(({ id }) => id) } },
+    data: {
+      status: BookingStatus.AT_RISK,
+      driverId: null,
+      otp: null,
+      otpGeneratedAt: null,
+      otpExpiresAt: null,
+      otpAttempts: 0,
+      otpVerified: false,
+      otpVerifiedAt: null,
+    },
+  });
+
+  await tx.notification.createMany({
+    data: stranded.map((booking) => ({
+      userId: booking.userId,
+      title: "Driver Change Needed",
+      message: `The driver for your booking on ${booking.startTime.toLocaleDateString("en-IN", { timeZone: society.timezone })} is no longer available. The society is arranging a replacement.`,
+    })),
   });
 }
 

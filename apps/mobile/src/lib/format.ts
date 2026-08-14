@@ -30,6 +30,22 @@ export function bookingTime(value: string, timezone: string) {
   return formatInTimeZone(value, timezone, "h:mm a");
 }
 
+/** "Sat, 16 Aug" — the year is noise for anything within a booking horizon. */
+export function shortDayLabel(value: string | Date, timezone: string) {
+  return formatInTimeZone(value, timezone, "EEE, d MMM");
+}
+
+/**
+ * Compared as calendar days in the society's timezone rather than by elapsed
+ * hours, so "today" means what a resident would mean by it.
+ */
+export function isTodayInTimezone(value: string | Date, timezone: string) {
+  return (
+    formatInTimeZone(value, timezone, "yyyy-MM-dd") ===
+    formatInTimeZone(new Date(), timezone, "yyyy-MM-dd")
+  );
+}
+
 export function defaultBookingFields(timezone: string) {
   const start = toZonedTime(new Date(), timezone);
   

@@ -467,12 +467,15 @@ describe("effective vehicle invariants", () => {
   });
 
   it("marks the effective reserve vehicle, not the original vehicle, on a driver issue", async () => {
+    // Unlike the availability cases above, this one drives the arrival flow, so
+    // the booking has to be inside its window rather than a day out.
+    const liveStart = shifted(new Date(), -10);
     const booking = await directBooking(fixture, {
       vehicleId: fixture.autoAssigned.id,
       reassignedVehicleId: fixture.reserve.id,
       driverId: fixture.driver.id,
-      startTime: fixture.base,
-      endTime: shifted(fixture.base, 60),
+      startTime: liveStart,
+      endTime: shifted(liveStart, 60),
       status: BookingStatus.DRIVER_ASSIGNED,
     });
 

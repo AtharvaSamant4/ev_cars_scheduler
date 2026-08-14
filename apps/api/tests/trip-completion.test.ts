@@ -27,7 +27,19 @@ describe("Trip completion, late penalty, and invoice", () => {
 
   async function createRide() {
     futureRideSequence += 1;
-    const start = new Date(Date.now() + (24 + futureRideSequence * 3) * 60 * minute);
+    // A driver may only start a trip once its booked window has opened, so the
+    // fixture has to be live rather than scheduled for tomorrow. Each ride gets
+    // its own vehicle so several can be in-window at the same time without
+    // colliding on the per-vehicle overlap constraint.
+    const rideVehicle = await prisma.vehicle.create({
+      data: {
+        societyId,
+        name: `Completion EV ${futureRideSequence}`,
+        registrationNumber: `CMP-EV-R${futureRideSequence}`,
+        hourlyRate,
+      },
+    });
+    const start = new Date(Date.now() - 10 * minute);
     start.setSeconds(0, 0);
     const period = getIsoWeek(start);
 
@@ -35,7 +47,7 @@ describe("Trip completion, late penalty, and invoice", () => {
       const booking = await tx.booking.create({
         data: {
           societyId,
-          vehicleId,
+          vehicleId: rideVehicle.id,
           flatId,
           userId: resident.id,
           driverId: driverProfileId,

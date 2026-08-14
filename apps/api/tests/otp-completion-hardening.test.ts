@@ -144,7 +144,9 @@ async function createFixture({
 }
 
 async function createOtpBooking(fixture: Fixture) {
-  const startTime = new Date(Date.now() + 24 * 60 * minute);
+  // Live rather than scheduled for tomorrow: a driver can only raise an OTP
+  // once the booked window has opened.
+  const startTime = new Date(Date.now() - 10 * minute);
   const period = getIsoWeek(startTime);
   return prisma.booking.create({
     data: {

@@ -120,9 +120,9 @@ describe("Driver booking authorization", () => {
       data: { userId: resident.id, balance: 10_000 },
     });
 
-    const start = new Date();
-    start.setDate(start.getDate() + 1);
-    start.setHours(10, 0, 0, 0);
+    // In-window, so the assigned driver can actually start this trip.
+    const start = new Date(Date.now() - 10 * 60_000);
+    start.setSeconds(0, 0);
     scheduledEnd = new Date(start.getTime() + 60 * 60_000);
     const period = getIsoWeek(start);
     bookingId = (await prisma.booking.create({
@@ -187,12 +187,21 @@ describe("Driver booking authorization", () => {
   });
 
   it("shows only driverId-assigned trips and identifies the reserve as effective", async () => {
+    // The fixture is live, so it lands in today's list rather than upcoming;
+    // search both so the assertion is about ownership, not bucketing.
     const assignedDashboard = await getDriverDashboard(assignedDriverUser);
-    const assignedBooking = assignedDashboard.upcoming.find((booking) => booking.id === bookingId);
+    const assignedBooking = [
+      ...assignedDashboard.today,
+      ...assignedDashboard.upcoming,
+    ].find((booking) => booking.id === bookingId);
     expect(assignedBooking?.effectiveVehicle.id).toBe(reserveVehicleId);
 
     const otherDashboard = await getDriverDashboard(otherDriverUser);
-    expect(otherDashboard.upcoming.some((booking) => booking.id === bookingId)).toBe(false);
+    expect(
+      [...otherDashboard.today, ...otherDashboard.upcoming].some(
+        (booking) => booking.id === bookingId,
+      ),
+    ).toBe(false);
   });
 
   it("rejects another driver even when both profiles share the primary vehicle", async () => {

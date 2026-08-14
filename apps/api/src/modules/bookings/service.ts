@@ -85,6 +85,61 @@ export function activeBookingFilter(now: Date): Prisma.BookingWhereInput {
   };
 }
 
+const BOOKING_BUFFER_MS = 30 * 60_000;
+
+/** Trips physically underway right now. */
+const RUNNING_STATUSES: BookingStatus[] = [
+  BookingStatus.IN_PROGRESS,
+  BookingStatus.ACTIVE,
+];
+
+/**
+ * Which existing bookings make a vehicle unavailable for the requested window.
+ *
+ * A reservation runs from its start to 30 minutes past its end, but "its end"
+ * has to mean when the vehicle is actually free, not what the calendar said:
+ *
+ *  - A trip that finished early releases the car at `actualEndTime`, so the
+ *    remainder of the slot can be booked by somebody else.
+ *  - A trip still running past its booked end keeps the car until it is
+ *    completed. Expiring the reservation at `endTime` would hand the same
+ *    vehicle to a second resident while it is still out on the road.
+ *
+ * The running case is expressed as `GREATEST(endTime, now) > threshold`, which
+ * splits into `endTime > threshold OR now > threshold` -- and the second half is
+ * a constant here, since `now` is known when the query is built.
+ */
+function vehicleBusyFilter(
+  startTime: Date,
+  endTime: Date,
+  now: Date,
+): Prisma.BookingWhereInput {
+  const bufferedStart = new Date(startTime.getTime() - BOOKING_BUFFER_MS);
+  const bufferedEnd = new Date(endTime.getTime() + BOOKING_BUFFER_MS);
+  const runningTripStillHoldsIt = now > bufferedStart;
+
+  return {
+    status: { not: BookingStatus.CANCELLED },
+    startTime: { lt: bufferedEnd },
+    OR: [
+      {
+        status: { in: RUNNING_STATUSES },
+        ...(runningTripStillHoldsIt
+          ? {}
+          : { endTime: { gt: bufferedStart } }),
+      },
+      {
+        status: { notIn: [BookingStatus.CANCELLED, ...RUNNING_STATUSES] },
+        endTime: { gt: bufferedStart },
+        OR: [
+          { actualEndTime: null },
+          { actualEndTime: { gt: bufferedStart } },
+        ],
+      },
+    ],
+  };
+}
+
 /** Strict complement of {@link activeBookingFilter}. */
 function settledBookingFilter(now: Date): Prisma.BookingWhereInput {
   return {
@@ -166,6 +221,32 @@ function assertAssignedDriver(bookingDriverId: string | null, driverId: string) 
   if (bookingDriverId !== driverId) {
     throw new AppError(403, "FORBIDDEN", "This booking is assigned to another driver");
   }
+}
+
+/**
+ * Drivers legitimately turn up a few minutes early, so arrival opens shortly
+ * before the booked start. Anything earlier than this is not an early arrival,
+ * it is starting a trip that is not due -- which took the vehicle off the road
+ * during a window availability still believed was free.
+ */
+const EARLY_START_GRACE_MINUTES = 15;
+
+function assertBookingWindowOpen(startTime: Date, timezone: string, now: Date) {
+  const opensAt = new Date(
+    startTime.getTime() - EARLY_START_GRACE_MINUTES * 60_000,
+  );
+
+  if (now < opensAt) {
+    throw new AppError(
+      409,
+      "TRIP_NOT_DUE",
+      `This trip cannot start yet. It opens at ${formatDateTimeInTimezone(opensAt, timezone)}, ${EARLY_START_GRACE_MINUTES} minutes before the booked slot.`,
+    );
+  }
+
+  // Deliberately no upper bound: a driver held up in traffic must still be able
+  // to start the trip. Running past the booked end is handled by the late-return
+  // penalty at completion, not by locking them out of the ride entirely.
 }
 
 async function societyTimezone(societyId: string) {
@@ -395,6 +476,7 @@ export async function checkAvailability(
   const timezone = await societyTimezone(user.societyId);
   const range = normalizeBookingRange(startValue, endValue, timezone, user.role);
   await ensureWeeklyQuotaHorizon(flatId, user.societyId, range.startTime);
+  const now = new Date();
 
   const [quota, availableVehicles, wallet] = await Promise.all([
     prisma.flatQuota.findUnique({
@@ -414,20 +496,12 @@ export async function checkAvailability(
         AND: [
           {
             bookings: {
-              none: {
-                status: { not: BookingStatus.CANCELLED },
-                startTime: { lt: new Date(range.endTime.getTime() + 30 * 60000) },
-                endTime: { gt: new Date(range.startTime.getTime() - 30 * 60000) },
-              },
+              none: vehicleBusyFilter(range.startTime, range.endTime, now),
             },
           },
           {
             reassignedBookings: {
-              none: {
-                status: { not: BookingStatus.CANCELLED },
-                startTime: { lt: new Date(range.endTime.getTime() + 30 * 60000) },
-                endTime: { gt: new Date(range.startTime.getTime() - 30 * 60000) },
-              },
+              none: vehicleBusyFilter(range.startTime, range.endTime, now),
             },
           },
         ],
@@ -537,12 +611,22 @@ export async function createBooking(
             AND "status" = 'AVAILABLE'
             AND "isReserve" = false
             AND NOT EXISTS (
-              SELECT 1 
-              FROM "Booking" 
+              SELECT 1
+              FROM "Booking"
                WHERE ("vehicleId" = ${vehicleId}::uuid OR "reassignedVehicleId" = ${vehicleId}::uuid)
                 AND "status" != 'CANCELLED'
-                AND "startTime" < ${new Date(range.endTime.getTime() + 30 * 60000)}
-                AND "endTime" > ${new Date(range.startTime.getTime() - 30 * 60000)}
+                AND "startTime" < ${new Date(range.endTime.getTime() + BOOKING_BUFFER_MS)}
+                -- Mirrors vehicleBusyFilter: a trip still running holds the
+                -- vehicle past its booked end, and one that finished early
+                -- releases it. Diverging from that check here would let
+                -- availability offer a slot that creation then refuses.
+                AND (
+                  CASE
+                    WHEN "status" IN ('IN_PROGRESS', 'ACTIVE')
+                      THEN GREATEST("endTime", NOW())
+                    ELSE LEAST("actualEndTime", "endTime")
+                  END
+                ) > ${new Date(range.startTime.getTime() - BOOKING_BUFFER_MS)}
             )
           FOR UPDATE
         `;
@@ -841,8 +925,15 @@ export async function cancelBooking(user: AuthUser, bookingId: string) {
               },
             },
           });
-          
-          const penaltyAmount = rule?.isActive ? rule.amount : 0;
+
+          // AT_RISK means the society took the vehicle out of service -- a
+          // breakdown, or maintenance. The resident is cancelling because they
+          // no longer have a car, so charging them the cancellation fee would
+          // penalise them for the society's own problem.
+          const societyCausedCancellation =
+            booking.status === BookingStatus.AT_RISK;
+          const penaltyAmount =
+            rule?.isActive && !societyCausedCancellation ? rule.amount : 0;
 
           const transactionsToCreate: Prisma.WalletTransactionCreateWithoutWalletInput[] = [
             {
@@ -965,12 +1056,18 @@ export async function reassignBooking(
             AND "status" = 'AVAILABLE'
             AND "isReserve" = true
             AND NOT EXISTS (
-              SELECT 1 
-              FROM "Booking" 
+              SELECT 1
+              FROM "Booking"
               WHERE ("vehicleId" = ${reserveVehicleId}::uuid OR "reassignedVehicleId" = ${reserveVehicleId}::uuid)
                 AND "status" != 'CANCELLED'
-                AND "startTime" < ${new Date(booking.endTime.getTime() + 30 * 60000)}
-                AND "endTime" > ${new Date(booking.startTime.getTime() - 30 * 60000)}
+                AND "startTime" < ${new Date(booking.endTime.getTime() + BOOKING_BUFFER_MS)}
+                AND (
+                  CASE
+                    WHEN "status" IN ('IN_PROGRESS', 'ACTIVE')
+                      THEN GREATEST("endTime", NOW())
+                    ELSE LEAST("actualEndTime", "endTime")
+                  END
+                ) > ${new Date(booking.startTime.getTime() - BOOKING_BUFFER_MS)}
             )
           FOR UPDATE
         `;
@@ -1115,6 +1212,7 @@ export async function driverArrive(user: AuthUser, bookingId: string) {
   }
 
   const driver = await assignedDriverProfile(user);
+  const timezone = await societyTimezone(user.societyId);
 
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: string }[]>`
@@ -1138,6 +1236,8 @@ export async function driverArrive(user: AuthUser, bookingId: string) {
     assertAssignedDriver(booking.driverId, driver.id);
 
     const now = new Date();
+    assertBookingWindowOpen(booking.startTime, timezone, now);
+
     const firstArrival =
       booking.status === BookingStatus.DRIVER_ASSIGNED ||
       booking.status === BookingStatus.BOOKED ||
@@ -1183,6 +1283,7 @@ export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) 
   }
 
   const driver = await assignedDriverProfile(user);
+  const timezone = await societyTimezone(user.societyId);
 
   const result = await prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: string }[]>`
@@ -1214,6 +1315,10 @@ export async function verifyOtp(user: AuthUser, bookingId: string, otp: string) 
     }
 
     const now = new Date();
+    // Checked again here rather than trusting arrival alone: an OTP issued
+    // before this guard existed, or before the window opened, must still not
+    // be able to start the ride early.
+    assertBookingWindowOpen(booking.startTime, timezone, now);
 
     if (!booking.otpExpiresAt || now >= booking.otpExpiresAt) {
       throw new AppError(400, "OTP_EXPIRED", "OTP has expired");
@@ -1359,14 +1464,28 @@ export async function completeTrip(user: AuthUser, bookingId: string, actualEndT
         },
       });
 
-      await tx.penalty.create({
-        data: {
+      // Only one penalty per rule may exist for a booking. Creating it outright
+      // meant that if a late-return penalty had somehow already been recorded,
+      // completion failed and the trip could never be closed. Upserting keeps
+      // completion possible while still recording the charge exactly once.
+      await tx.penalty.upsert({
+        where: {
+          bookingId_penaltyRuleId: {
+            bookingId: booking.id,
+            penaltyRuleId: penaltyRule.id,
+          },
+        },
+        create: {
           bookingId: booking.id,
           penaltyRuleId: penaltyRule.id,
           amount: penaltyAmount,
           notes: "Late Return Penalty",
           createdByAdminId: user.id,
-        }
+        },
+        update: {
+          amount: penaltyAmount,
+          notes: "Late Return Penalty",
+        },
       });
     }
 

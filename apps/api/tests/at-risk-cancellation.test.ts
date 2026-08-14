@@ -67,7 +67,7 @@ describe("AT_RISK resident cancellation", () => {
 
   afterAll(async () => cleanupSocietyFixture(societyId));
 
-  it("lets the owning resident cancel a future AT_RISK booking under the normal refund and penalty policy", async () => {
+  it("refunds an AT_RISK booking in full, because the society caused it", async () => {
     const start = slot(1);
     const created = await createBooking(
       resident,
@@ -84,17 +84,20 @@ describe("AT_RISK resident cancellation", () => {
     const cancelled = await cancelBooking(resident, created.booking.id);
     expect(cancelled.booking.status).toBe(BookingStatus.CANCELLED);
     expect(cancelled.quota.usedMinutes).toBe(0);
-    expect((await prisma.wallet.findUniqueOrThrow({ where: { userId: resident.id } })).balance).toBe(4_950);
+    // AT_RISK means the vehicle was pulled out of service. Charging the
+    // cancellation fee here would penalise the resident for the society's own
+    // breakdown, so the fare comes back whole.
+    expect((await prisma.wallet.findUniqueOrThrow({ where: { userId: resident.id } })).balance).toBe(5_000);
 
     const transactions = await prisma.walletTransaction.findMany({
       where: { bookingId: created.booking.id },
     });
     expect(transactions.filter((transaction) => transaction.type === TransactionType.BOOKING_DEBIT)).toHaveLength(1);
     expect(transactions.filter((transaction) => transaction.type === TransactionType.REFUND)).toHaveLength(1);
-    expect(transactions.filter((transaction) => transaction.type === TransactionType.PENALTY)).toHaveLength(1);
+    expect(transactions.filter((transaction) => transaction.type === TransactionType.PENALTY)).toHaveLength(0);
   });
 
-  it("lets the owning resident cancel a future DRIVER_ASSIGNED booking", async () => {
+  it("still charges the fee when the resident cancels a healthy booking", async () => {
     const start = slot(2);
     const created = await createBooking(
       resident,
@@ -110,7 +113,7 @@ describe("AT_RISK resident cancellation", () => {
     const cancelled = await cancelBooking(resident, created.booking.id);
     expect(cancelled.booking.status).toBe(BookingStatus.CANCELLED);
     expect(cancelled.quota.usedMinutes).toBe(0);
-    expect((await prisma.wallet.findUniqueOrThrow({ where: { userId: resident.id } })).balance).toBe(4_900);
+    expect((await prisma.wallet.findUniqueOrThrow({ where: { userId: resident.id } })).balance).toBe(4_950);
 
     const transactions = await prisma.walletTransaction.findMany({
       where: { bookingId: created.booking.id },

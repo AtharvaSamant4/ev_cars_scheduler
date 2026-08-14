@@ -28,7 +28,12 @@ import { StatusPill } from "@/src/components/status-pill";
 import { Screen } from "@/src/components/screen";
 import { confirmAction, notify } from "@/src/lib/alerts";
 import { errorMessage } from "@/src/lib/api";
-import { bookingTime, hoursLabel } from "@/src/lib/format";
+import {
+  bookingTime,
+  hoursLabel,
+  isTodayInTimezone,
+  shortDayLabel,
+} from "@/src/lib/format";
 import { useAuthStore } from "@/src/store/auth";
 import { colors, fonts, radius, spacing } from "@/src/theme";
 import type { DriverTrip } from "@/src/types/api";
@@ -50,6 +55,27 @@ function effStatus(trip: DriverTrip) {
 function isVehicleDown(trip: DriverTrip) {
   const status = trip.effectiveVehicle.status;
   return status === "BREAKDOWN" || status === "MAINTENANCE" || status === "INACTIVE";
+}
+
+// Mirrors EARLY_START_GRACE_MINUTES on the server. Kept in step so the button
+// becomes tappable exactly when arrival would be accepted -- if the screen were
+// more permissive, the driver would tap and get an error instead.
+const ARRIVAL_OPENS_MINUTES_BEFORE = 15;
+
+/**
+ * A slow clock so time-gated controls unlock on their own. Polling alone is not
+ * enough: React Query hands back the same object when nothing has changed, so
+ * nothing re-renders and the button would stay disabled past its opening time.
+ */
+function useNow(intervalMs = 20_000) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+
+  return now;
 }
 
 function useElapsedLabel(sinceIso: string | undefined) {
@@ -192,6 +218,7 @@ function NextJobCard({
   laterCount: number;
 }) {
   const arrive = useDriverArrive(trip.id);
+  const now = useNow();
   const risk = isVehicleDown(trip) || effStatus(trip) === "AT_RISK";
 
   const handleArrive = async () => {
@@ -206,10 +233,17 @@ function NextJobCard({
 
   const call = () => trip.user.phone && Linking.openURL(`tel:${trip.user.phone}`);
 
+  const isToday = isTodayInTimezone(trip.startTime, timezone);
+  const arrivalOpensAt = new Date(
+    new Date(trip.startTime).getTime() -
+      ARRIVAL_OPENS_MINUTES_BEFORE * 60_000,
+  );
+  const arrivalOpen = now >= arrivalOpensAt.getTime();
+
   return (
     <View style={styles.nextJobCard}>
       <View style={styles.nextJobTopRow}>
-        <Text style={styles.nextJobBadge}>NEXT JOB</Text>
+        <Text style={styles.nextJobBadge}>{isToday ? "NEXT JOB" : "UPCOMING"}</Text>
         <Text style={styles.nextJobId}>{trip.id.slice(0, 10)}</Text>
       </View>
 
@@ -222,6 +256,11 @@ function NextJobCard({
         </View>
       ) : null}
 
+      {/* Without the day, a job three days out looked identical to one this
+          morning -- the card only ever showed a clock time. */}
+      <Text style={styles.nextJobDay}>
+        {isToday ? "Today" : shortDayLabel(trip.startTime, timezone)}
+      </Text>
       <Text style={styles.nextJobTime}>
         {bookingTime(trip.startTime, timezone)}
         <Text style={styles.nextJobTimeEnd}> → {bookingTime(trip.endTime, timezone)}</Text>
@@ -250,13 +289,28 @@ function NextJobCard({
       {laterCount > 0 ? (
         <View style={styles.laterRow}>
           <Text style={styles.laterLabel}>Later</Text>
-          <Text style={styles.laterCount}>{laterCount} more today</Text>
+          <Text style={styles.laterCount}>
+            {laterCount} more {laterCount === 1 ? "job" : "jobs"}
+          </Text>
         </View>
       ) : null}
 
       {risk ? (
         <View style={styles.disabledCta}>
           <Text style={styles.disabledCtaText}>Waiting for a working EV</Text>
+        </View>
+      ) : !arrivalOpen ? (
+        // The server refuses arrival until the window opens, so the button must
+        // not look tappable before then -- otherwise the driver taps and is met
+        // with an error for doing nothing wrong.
+        <View style={styles.disabledCta}>
+          <Text style={styles.disabledCtaText}>
+            You can start this trip from{" "}
+            {bookingTime(arrivalOpensAt.toISOString(), timezone)}
+            {isTodayInTimezone(arrivalOpensAt, timezone)
+              ? ""
+              : ` on ${shortDayLabel(arrivalOpensAt, timezone)}`}
+          </Text>
         </View>
       ) : (
         <Pressable
@@ -556,6 +610,9 @@ function TripRow({ trip, timezone }: { trip: DriverTrip; timezone: string }) {
         <StatusPill status={effStatus(trip)} />
       </View>
       <Text style={styles.tripRowSubtitle}>
+        {isTodayInTimezone(trip.startTime, timezone)
+          ? ""
+          : `${shortDayLabel(trip.startTime, timezone)} · `}
         {bookingTime(trip.startTime, timezone)} – {bookingTime(trip.endTime, timezone)} ·{" "}
         {trip.effectiveVehicle.name}
       </Text>
@@ -661,11 +718,19 @@ const styles = StyleSheet.create({
   },
   riskBannerTitle: { color: colors.accent, fontSize: 13.5, fontWeight: "600" },
   riskBannerText: { color: "#D8C79A", fontSize: 12.5, lineHeight: 18, marginTop: 4 },
+  nextJobDay: {
+    color: colors.liveDot,
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    marginTop: 18,
+    textTransform: "uppercase",
+  },
   nextJobTime: {
     color: colors.surface,
     fontSize: 29,
     fontWeight: "700",
-    marginTop: 18,
+    marginTop: 4,
     letterSpacing: -0.4,
     fontFamily: fonts.mono,
   },
