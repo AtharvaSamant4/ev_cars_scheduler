@@ -14,7 +14,12 @@ import { Card } from "@/src/components/card";
 import { Screen } from "@/src/components/screen";
 import { errorMessage } from "@/src/lib/api";
 import { notify } from "@/src/lib/alerts";
-import { bookingRange, currencyLabel, hoursLabel } from "@/src/lib/format";
+import {
+  bookingRange,
+  currencyLabel,
+  hoursLabel,
+  nextCalendarDay,
+} from "@/src/lib/format";
 import { useAuthStore } from "@/src/store/auth";
 import { colors, fonts, radius, spacing } from "@/src/theme";
 import type { AvailableVehicle, Booking } from "@/src/types/api";
@@ -22,9 +27,14 @@ import type { AvailableVehicle, Booking } from "@/src/types/api";
 // Server allows booking up to 7 days ahead (apps/api/src/modules/bookings/service.ts).
 // Offering exactly a week here (today + 6) keeps every visible slot inside that window.
 const DAY_COUNT = 7;
-const DAY_START_MINUTES = 6 * 60;
-const DAY_LAST_START_MINUTES = 22 * 60;
-const LAST_END_MINUTES = 23 * 60 + 30;
+// Midnight onwards. The server never restricted the hours -- this screen used to
+// start at 6am, which quietly made a car unbookable during exactly the hours
+// somebody is most likely to need one urgently.
+const DAY_START_MINUTES = 0;
+// Every half-hour of the day is offered. A trip may run past midnight -- the end
+// simply falls on the next calendar day.
+const DAY_LAST_START_MINUTES = 23 * 60 + 30;
+const MINUTES_IN_DAY = 24 * 60;
 const SLOT_STEP = 30;
 // Server requires at least 60 minutes (apps/api/.../bookings/service.ts).
 const MIN_DURATION = 60;
@@ -108,13 +118,15 @@ export default function BookVehicleScreen() {
   );
   const startTime = slots[Math.min(slotIndex, slots.length - 1)] ?? null;
 
-  const maxDurationForStart = startTime
-    ? Math.max(MIN_DURATION, LAST_END_MINUTES - timeToMinutes(startTime))
-    : MAX_DURATION;
-  const clampedDuration = Math.min(durationMinutes, maxDurationForStart);
-  const endTime = startTime
-    ? minutesToTime(timeToMinutes(startTime) + clampedDuration)
+  // No longer capped by the end of the day, only by the longest trip allowed.
+  const clampedDuration = Math.min(durationMinutes, MAX_DURATION);
+  const endTotalMinutes = startTime
+    ? timeToMinutes(startTime) + clampedDuration
     : null;
+  const endsNextDay =
+    endTotalMinutes !== null && endTotalMinutes >= MINUTES_IN_DAY;
+  const endTime = endTotalMinutes === null ? null : minutesToTime(endTotalMinutes);
+  const endDate = endsNextDay ? nextCalendarDay(day.date) : day.date;
 
   const quota = dashboard.data?.quota;
   const overQuota = Boolean(quota && clampedDuration > quota.remainingMinutes);
@@ -147,7 +159,7 @@ export default function BookVehicleScreen() {
 
   const changeDuration = (delta: number) => {
     setDurationMinutes((prev) =>
-      Math.max(MIN_DURATION, Math.min(maxDurationForStart, prev + delta)),
+      Math.max(MIN_DURATION, Math.min(MAX_DURATION, prev + delta)),
     );
     setSelectedVehicleId(null);
     availability.reset();
@@ -165,7 +177,7 @@ export default function BookVehicleScreen() {
     }
 
     try {
-      const range = bookingRange(day.date, startTime, endTime, timezone);
+      const range = bookingRange(day.date, startTime, endTime, timezone, endDate);
       await availability.mutateAsync(range);
       setStep(2);
     } catch (error) {
@@ -178,7 +190,7 @@ export default function BookVehicleScreen() {
     setMessage(null);
 
     try {
-      const range = bookingRange(day.date, startTime, endTime, timezone);
+      const range = bookingRange(day.date, startTime, endTime, timezone, endDate);
       const result = await createBooking.mutateAsync({
         ...range,
         vehicleId: selectedVehicleId,
@@ -204,6 +216,7 @@ export default function BookVehicleScreen() {
         <Text style={styles.doneTitle}>{bookedBooking.vehicle.name} is yours</Text>
         <Text style={styles.doneSubtitle}>
           {day.label} · {to12(startTime ?? "")} – {to12(endTime ?? "")}
+          {endsNextDay ? " (next day)" : ""}
         </Text>
         <Card style={styles.doneCard}>
           <DoneRow label="Registration" value={bookedBooking.vehicle.registrationNumber} mono />
@@ -255,6 +268,7 @@ export default function BookVehicleScreen() {
         <View style={styles.windowSummary}>
           <Text style={styles.windowSummaryTitle}>
             {day.label} · {to12(startTime ?? "")} – {to12(endTime ?? "")}
+          {endsNextDay ? " (next day)" : ""}
           </Text>
           <Text style={styles.windowSummarySubtitle}>
             {availability.data?.availableVehicleCount ?? 0} EV
@@ -383,7 +397,9 @@ export default function BookVehicleScreen() {
             })}
           </View>
         )}
-        <Text style={styles.note}>Slots follow the 30-minute rule the society enforces.</Text>
+        <Text style={styles.note}>
+          Any time of day, in 30-minute steps. Trips may run past midnight.
+        </Text>
       </View>
 
       <Card style={styles.durationCard}>

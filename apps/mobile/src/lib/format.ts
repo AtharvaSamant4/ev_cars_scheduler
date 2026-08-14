@@ -66,13 +66,27 @@ export function defaultBookingFields(timezone: string) {
   };
 }
 
+/** Calendar-day arithmetic on a plain YYYY-MM-DD string, month ends included. */
+export function nextCalendarDay(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + 1));
+  return format(shifted, "yyyy-MM-dd");
+}
+
 export function bookingRange(
   date: string,
   startTime: string,
   endTime: string,
   timezone: string,
+  // A trip that runs to midnight or beyond ends on the following date. Building
+  // both ends from one date made 10:30pm-12:00am read as ending before it
+  // started, which is why late-evening slots were unbookable at all.
+  endDate: string = date,
 ) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(endDate)
+  ) {
     throw new Error("Use date format YYYY-MM-DD");
   }
 
@@ -81,7 +95,7 @@ export function bookingRange(
   }
 
   const start = fromZonedTime(`${date}T${startTime}:00`, timezone);
-  const end = fromZonedTime(`${date}T${endTime}:00`, timezone);
+  const end = fromZonedTime(`${endDate}T${endTime}:00`, timezone);
 
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     throw new Error("Enter a valid date and time");
@@ -91,7 +105,7 @@ export function bookingRange(
     formatInTimeZone(start, timezone, "yyyy-MM-dd HH:mm") !==
       `${date} ${startTime}` ||
     formatInTimeZone(end, timezone, "yyyy-MM-dd HH:mm") !==
-      `${date} ${endTime}`
+      `${endDate} ${endTime}`
   ) {
     throw new Error("Enter a real date and time in your society timezone");
   }
