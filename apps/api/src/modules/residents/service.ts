@@ -6,6 +6,7 @@ import {
   activeBookingFilter,
   bookingResponse,
   residentFlatId,
+  withVehicleDelay,
 } from "@/src/modules/bookings/service";
 import {
   currentQuotaPeriods,
@@ -84,7 +85,7 @@ export async function getDashboard(user: AuthUser) {
 
   return {
     quota,
-    upcomingBookings: upcomingBookings.map((booking) =>
+    upcomingBookings: (await withVehicleDelay(upcomingBookings)).map((booking) =>
       bookingResponse(booking),
     ),
   };

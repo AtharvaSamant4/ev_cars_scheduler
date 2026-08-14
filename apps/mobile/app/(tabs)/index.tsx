@@ -26,7 +26,7 @@ import {
   hoursShortLabel,
 } from "@/src/lib/format";
 import { useAuthStore } from "@/src/store/auth";
-import { colors, fonts, spacing } from "@/src/theme";
+import { colors, fonts, radius, spacing } from "@/src/theme";
 import type { Booking } from "@/src/types/api";
 
 export default function DashboardScreen() {
@@ -78,6 +78,10 @@ export default function DashboardScreen() {
     ? upcomingBookings.find((b) => b.effectiveStatus === "OTP_PENDING")
     : undefined;
   const focus = live ?? otpPending ?? upcomingBookings[0];
+  // The vehicle for an imminent booking is still out on someone else's trip.
+  const delayedBooking = upcomingBookings.find(
+    (booking) => (booking.vehicleDelayedMinutes ?? 0) > 0,
+  );
 
   const initials = (user.name || "?")
     .split(" ")
@@ -121,6 +125,18 @@ export default function DashboardScreen() {
           <Text style={styles.avatarText}>{initials}</Text>
         </Pressable>
       </View>
+
+      {delayedBooking ? (
+        <View style={styles.delayBanner}>
+          <Text style={styles.delayBannerTitle}>Your EV is running late</Text>
+          <Text style={styles.delayBannerText}>
+            {delayedBooking.vehicle.name} is still out on an earlier trip,{" "}
+            {hoursLabel(delayedBooking.vehicleDelayedMinutes ?? 0)} past its
+            return time. The society has been alerted. You can wait, or cancel
+            for a full refund with no cancellation fee.
+          </Text>
+        </View>
+      ) : null}
 
       <FocusCard booking={focus} timezone={timezone} router={router} />
 
@@ -308,6 +324,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.md,
+  },
+  delayBanner: {
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warningBorder,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: 5,
+    padding: spacing.md,
+  },
+  delayBannerTitle: {
+    color: colors.warning,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  delayBannerText: {
+    color: colors.warning,
+    fontSize: 13.5,
+    lineHeight: 19,
   },
   headerCopy: {
     flex: 1,

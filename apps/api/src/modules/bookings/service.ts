@@ -140,6 +140,115 @@ function vehicleBusyFilter(
   };
 }
 
+/**
+ * How close a booking has to be before an overrunning trip on the same vehicle
+ * is the resident's problem. Matches the turnaround buffer, so the warning
+ * arrives at roughly the moment the vehicle should have been handed back.
+ */
+const DELAY_WARNING_HORIZON_MS = BOOKING_BUFFER_MS;
+
+type VehicleDelay = { minutesLate: number };
+
+/**
+ * Vehicles that should be free by now but are still out on a running trip.
+ *
+ * Nothing in the system reacts to a trip simply overrunning -- a booking is only
+ * flagged when a human acts, by taking a vehicle out of service or reporting a
+ * breakdown. So the resident waiting for that vehicle next had no way of knowing
+ * it was still on the road. This is read on demand rather than written to the
+ * booking, because the delay resolves itself the moment the trip is completed
+ * and a stored flag would linger after it stopped being true.
+ */
+async function overdueVehicleHolds(
+  vehicleIds: string[],
+  now: Date,
+): Promise<Map<string, VehicleDelay>> {
+  const held = new Map<string, VehicleDelay>();
+
+  if (!vehicleIds.length) {
+    return held;
+  }
+
+  const running = await prisma.booking.findMany({
+    where: {
+      status: { in: RUNNING_STATUSES },
+      endTime: { lt: now },
+      OR: [
+        { vehicleId: { in: vehicleIds }, reassignedVehicleId: null },
+        { reassignedVehicleId: { in: vehicleIds } },
+      ],
+    },
+    select: { vehicleId: true, reassignedVehicleId: true, endTime: true },
+  });
+
+  for (const trip of running) {
+    const vehicleId = trip.reassignedVehicleId ?? trip.vehicleId;
+    const minutesLate = Math.max(
+      1,
+      Math.round((now.getTime() - trip.endTime.getTime()) / 60_000),
+    );
+    const existing = held.get(vehicleId);
+
+    if (!existing || minutesLate > existing.minutesLate) {
+      held.set(vehicleId, { minutesLate });
+    }
+  }
+
+  return held;
+}
+
+type DelayAnnotatable = {
+  id: string;
+  status: BookingStatus;
+  startTime: Date;
+  vehicleId: string;
+  reassignedVehicleId?: string | null;
+};
+
+/**
+ * Marks each booking whose vehicle is still out on an overrunning trip, but only
+ * once it is close enough to matter -- a booking next week is not affected by a
+ * car that is late today.
+ */
+export async function withVehicleDelay<T extends DelayAnnotatable>(
+  bookings: T[],
+  now: Date = new Date(),
+): Promise<Array<T & { vehicleDelayedMinutes: number | null }>> {
+  const imminent = bookings.filter(
+    (booking) =>
+      !TERMINAL_STATUSES.includes(booking.status) &&
+      !RUNNING_STATUSES.includes(booking.status) &&
+      booking.startTime.getTime() <= now.getTime() + DELAY_WARNING_HORIZON_MS,
+  );
+
+  if (!imminent.length) {
+    return bookings.map((booking) => ({ ...booking, vehicleDelayedMinutes: null }));
+  }
+
+  const held = await overdueVehicleHolds(
+    [
+      ...new Set(
+        imminent.map(
+          (booking) => booking.reassignedVehicleId ?? booking.vehicleId,
+        ),
+      ),
+    ],
+    now,
+  );
+
+  return bookings.map((booking) => {
+    const affected = imminent.some((candidate) => candidate.id === booking.id);
+    const delay = affected
+      ? held.get(booking.reassignedVehicleId ?? booking.vehicleId)
+      : undefined;
+
+    return {
+      ...booking,
+      vehicleDelayedMinutes: delay?.minutesLate ?? null,
+    };
+  });
+}
+
 /** Strict complement of {@link activeBookingFilter}. */
 function settledBookingFilter(now: Date): Prisma.BookingWhereInput {
   return {
@@ -827,7 +936,8 @@ export async function getResidentBooking(user: AuthUser, bookingId: string) {
     throw new AppError(404, "NOT_FOUND", "Booking not found");
   }
 
-  return bookingResponse(booking);
+  const [annotated] = await withVehicleDelay([booking]);
+  return bookingResponse(annotated);
 }
 
 export async function cancelBooking(user: AuthUser, bookingId: string) {

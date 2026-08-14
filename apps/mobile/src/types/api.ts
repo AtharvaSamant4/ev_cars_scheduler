@@ -72,6 +72,11 @@ export type Booking = {
   durationMinutes: number;
   status: BookingStatus;
   effectiveStatus: BookingStatus;
+  /**
+   * Minutes by which the vehicle for this booking is overdue back from an
+   * earlier trip, or null when it is not held up.
+   */
+  vehicleDelayedMinutes?: number | null;
   otp?: string | null;
   otpGeneratedAt?: string | null;
   otpExpiresAt?: string | null;
